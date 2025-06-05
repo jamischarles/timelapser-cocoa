@@ -148,11 +148,21 @@ struct CaptureView: View {
                         .multilineTextAlignment(.center)
                         .foregroundColor(.secondary)
                     
-                    Button("Open System Preferences") {
-                        screenshotManager.openSystemPreferences()
+                    VStack(spacing: 12) {
+                        Button("Request Permission") {
+                            Task {
+                                await screenshotManager.requestPermissions()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        
+                        Button("Open System Preferences") {
+                            screenshotManager.openSystemPreferences()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
                 }
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

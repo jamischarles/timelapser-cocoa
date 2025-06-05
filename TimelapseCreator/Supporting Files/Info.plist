@@ -36,5 +36,7 @@
 	<string>This app needs access to your Documents folder to save timelapse screenshots and projects.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>This app needs access to your Downloads folder to save timelapse screenshots and projects.</string>
+	<key>NSScreenCaptureDescription</key>
+	<string>This app needs screen recording permission to capture screenshots for creating timelapse videos. Your screen content will only be saved locally and never shared.</string>
 </dict>
 </plist> 

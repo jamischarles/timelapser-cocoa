@@ -62,6 +62,40 @@ class ScreenshotManager: ObservableObject {
         print(hasPermission ? "✅ Screen recording permission granted" : "⚠️ Screen recording permission not granted")
     }
     
+    func requestPermissions() async {
+        // First check if we already have permission
+        if CGPreflightScreenCaptureAccess() {
+            await MainActor.run {
+                hasPermission = true
+                print("✅ Screen recording permission already granted")
+            }
+            return
+        }
+        
+        print("🔑 Requesting screen recording permission...")
+        
+        // Actually attempt to capture the screen to trigger permission dialog
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            captureQueue.async {
+                // This will trigger the permission dialog
+                let testImage = CGWindowListCreateImage(
+                    CGRect(x: 0, y: 0, width: 1, height: 1),
+                    .optionOnScreenOnly,
+                    kCGNullWindowID,
+                    .bestResolution
+                )
+                
+                // Check permission status after attempting capture
+                DispatchQueue.main.async {
+                    let newPermissionStatus = CGPreflightScreenCaptureAccess()
+                    self.hasPermission = newPermissionStatus
+                    print(newPermissionStatus ? "✅ Screen recording permission granted" : "⚠️ Screen recording permission dialog shown")
+                    continuation.resume()
+                }
+            }
+        }
+    }
+    
     func openSystemPreferences() {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         NSWorkspace.shared.open(url)

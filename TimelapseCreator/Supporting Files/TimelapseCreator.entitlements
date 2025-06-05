@@ -24,5 +24,9 @@
 	<false/>
 	<key>com.apple.security.network.server</key>
 	<false/>
+	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+	<array>
+		<string>com.apple.coreservices.launchservicesd</string>
+	</array>
 </dict>
 </plist> 
