@@ -67,11 +67,15 @@ class ProjectManager: ObservableObject {
 }
 
 // MARK: - Project Model
-struct Project: Identifiable {
+struct Project: Identifiable, Equatable {
     let id = UUID()
     let name: String
     let url: URL
     let createdAt: Date
+    
+    static func == (lhs: Project, rhs: Project) -> Bool {
+        return lhs.id == rhs.id
+    }
     
     var screenshotCount: Int {
         do {
