@@ -17,7 +17,7 @@ class ProjectManager: ObservableObject {
     
     // MARK: - Private Properties
     private let fileManager = FileManager.default
-    private let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    private let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
     
     // MARK: - Initialization
     init() {
@@ -31,7 +31,7 @@ class ProjectManager: ObservableObject {
         let timestamp = formatter.string(from: Date())
         
         let projectName = "Project_\(timestamp)"
-        let projectsURL = documentsURL.appendingPathComponent("TimelapseCaptureProjects")
+        let projectsURL = downloadsURL.appendingPathComponent("TimelapseCaptureProjects")
         let projectURL = projectsURL.appendingPathComponent(projectName)
         
         do {
@@ -46,7 +46,7 @@ class ProjectManager: ObservableObject {
     }
     
     private func loadProjects() {
-        let projectsURL = documentsURL.appendingPathComponent("TimelapseCaptureProjects")
+        let projectsURL = downloadsURL.appendingPathComponent("TimelapseCaptureProjects")
         
         do {
             let projectDirectories = try fileManager.contentsOfDirectory(at: projectsURL, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles)

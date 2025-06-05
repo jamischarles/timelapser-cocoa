@@ -12,6 +12,7 @@
 	<true/>
 	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
 	<array>
+		<string>/Documents/</string>
 		<string>/Documents/TimelapseCaptureProjects/</string>
 	</array>
 	<key>com.apple.security.device.microphone</key>

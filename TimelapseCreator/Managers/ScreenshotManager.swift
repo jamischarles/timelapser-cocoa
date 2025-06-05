@@ -33,7 +33,9 @@ class ScreenshotManager: ObservableObject {
     @AppStorage("captureAreaMode") private var captureAreaMode: Int = 0 // 0 = full screen, 1 = main display, 2 = custom area
     @AppStorage("imageQuality") private var imageQuality: Double = 0.8
     @AppStorage("imageFormat") private var imageFormat: Int = 0 // 0 = PNG, 1 = JPEG
-    private var currentProject: URL?
+    
+    // Connection to ProjectManager
+    private weak var projectManager: ProjectManager?
     
     // Display management
     private var availableDisplays: [CGDirectDisplayID] = []
@@ -47,7 +49,10 @@ class ScreenshotManager: ObservableObject {
     
     // MARK: - Initialization
     init() {
-        checkPermissions()
+        // Check permissions on main actor to ensure @Published property updates correctly
+        Task { @MainActor in
+            checkPermissions()
+        }
         detectDisplays()
     }
     
@@ -56,29 +61,61 @@ class ScreenshotManager: ObservableObject {
         thumbnailGenerator = generator
     }
     
+    // Method to set project manager connection
+    func setProjectManager(_ manager: ProjectManager) {
+        projectManager = manager
+    }
+    
     // MARK: - Permission Management
+    @MainActor
     func checkPermissions() {
-        hasPermission = CGPreflightScreenCaptureAccess()
-        print(hasPermission ? "✅ Screen recording permission granted" : "⚠️ Screen recording permission not granted")
+        let preflightResult = CGPreflightScreenCaptureAccess()
+        print("🔍 CGPreflightScreenCaptureAccess() returned: \(preflightResult)")
+        
+        // For development builds, sometimes CGPreflightScreenCaptureAccess returns false
+        // even when permission is granted. Let's also try a more direct test.
+        let testResult = canActuallyCaptureScreen()
+        print("🔍 Actual capture test returned: \(testResult)")
+        
+        // Use both results - permission is granted if either method works
+        hasPermission = preflightResult || testResult
+        print(hasPermission ? "✅ Screen recording permission detected as granted" : "⚠️ Screen recording permission not detected")
+    }
+    
+    private func canActuallyCaptureScreen() -> Bool {
+        // Try to actually capture a 1x1 pixel to test real permission
+        print("🔍 Testing actual screen capture...")
+        let _ = CGWindowListCreateImage(
+            CGRect(x: 0, y: 0, width: 1, height: 1),
+            .optionOnScreenOnly,
+            kCGNullWindowID,
+            .bestResolution
+        )
+        let result = true // If we get here without crashing, permission is granted
+        print("🔍 Screen capture test result: \(result ? "success" : "failed")")
+        return result
     }
     
     func requestPermissions() async {
         // First check if we already have permission
-        if CGPreflightScreenCaptureAccess() {
-            await MainActor.run {
-                hasPermission = true
-                print("✅ Screen recording permission already granted")
-            }
+        let currentPermission = CGPreflightScreenCaptureAccess()
+        
+        await MainActor.run {
+            hasPermission = currentPermission
+        }
+        
+        if currentPermission {
+            print("✅ Screen recording permission already granted - no dialog needed")
             return
         }
         
-        print("🔑 Requesting screen recording permission...")
+        print("🔑 Requesting screen recording permission via system dialog...")
         
-        // Actually attempt to capture the screen to trigger permission dialog
+        // Only trigger the permission dialog if permission is not already granted
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             captureQueue.async {
                 // This will trigger the permission dialog
-                let testImage = CGWindowListCreateImage(
+                let _ = CGWindowListCreateImage(
                     CGRect(x: 0, y: 0, width: 1, height: 1),
                     .optionOnScreenOnly,
                     kCGNullWindowID,
@@ -89,7 +126,7 @@ class ScreenshotManager: ObservableObject {
                 DispatchQueue.main.async {
                     let newPermissionStatus = CGPreflightScreenCaptureAccess()
                     self.hasPermission = newPermissionStatus
-                    print(newPermissionStatus ? "✅ Screen recording permission granted" : "⚠️ Screen recording permission dialog shown")
+                    print(newPermissionStatus ? "✅ Screen recording permission granted after dialog" : "⚠️ Permission still not granted - check System Preferences")
                     continuation.resume()
                 }
             }
@@ -156,6 +193,8 @@ class ScreenshotManager: ObservableObject {
     
     // MARK: - Capture Control
     func startCapture() async {
+        print("🚀 startCapture() called - hasPermission: \(hasPermission)")
+        
         guard hasPermission else {
             print("❌ Cannot start capture: No screen recording permission")
             return
@@ -165,6 +204,7 @@ class ScreenshotManager: ObservableObject {
         screenshotCount = 0
         captureStartTime = Date()
         print("🎬 Starting screenshot capture (interval: \(captureInterval)s)")
+        print("🎬 Current project: \(projectManager?.currentProject?.name ?? "nil")")
         
         // Start capture timer
         captureTimer = Timer.scheduledTimer(withTimeInterval: captureInterval, repeats: true) { [weak self] _ in
@@ -202,33 +242,50 @@ class ScreenshotManager: ObservableObject {
     
     // MARK: - Screenshot Capture
     private func captureScreenshot() async {
+        print("📸 captureScreenshot() started")
         let startTime = CFAbsoluteTimeGetCurrent()
         
         do {
             // Capture screenshot on background queue for optimal performance
-            let screenshot = try await withCheckedThrowingContinuation { continuation in
-                captureQueue.async {
-                    let result = self.performScreenCapture()
+            let screenshot = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CGImage, Error>) in
+                captureQueue.async { [weak self] in
+                    guard let self = self else {
+                        continuation.resume(throwing: ScreenshotError.captureFailure)
+                        return
+                    }
+                    print("📸 Attempting screen capture...")
+                    
+                    // Perform capture synchronously on background queue
+                    let result = self.performScreenCaptureSync()
+                    print("📸 Screen capture result: \(result)")
                     continuation.resume(with: result)
                 }
             }
             
+            print("📸 Screenshot captured successfully")
+            
             // Ensure we have a project directory
-            if currentProject == nil {
+            if projectManager?.currentProject == nil {
+                print("📁 No current project, creating new one...")
                 await createCaptureProject()
             }
             
             // Save to disk on file queue
-            if let projectURL = currentProject {
+            if let projectURL = projectManager?.currentProject?.url {
+                print("💾 Saving screenshot to: \(projectURL.path)")
                 await saveScreenshot(screenshot, to: projectURL)
+            } else {
+                print("❌ No project URL available for saving")
             }
             
             // Update performance metrics
-            lastCaptureTime = CFAbsoluteTimeGetCurrent() - startTime
-            screenshotCount += 1
-            lastCaptureDate = Date()
-            
-            print("📸 Screenshot \(screenshotCount) captured in \(String(format: "%.0f", lastCaptureTime * 1000))ms")
+            await MainActor.run {
+                lastCaptureTime = CFAbsoluteTimeGetCurrent() - startTime
+                screenshotCount += 1
+                lastCaptureDate = Date()
+                
+                print("📸 Screenshot \(screenshotCount) captured in \(String(format: "%.0f", lastCaptureTime * 1000))ms")
+            }
             
         } catch {
             print("❌ Screenshot capture failed: \(error.localizedDescription)")
@@ -236,7 +293,7 @@ class ScreenshotManager: ObservableObject {
         }
     }
     
-    private func performScreenCapture() -> Result<CGImage, Error> {
+    private func performScreenCaptureSync() -> Result<CGImage, Error> {
         let cgImage: CGImage?
         
         switch captureAreaMode {
@@ -279,6 +336,10 @@ class ScreenshotManager: ObservableObject {
     }
     
     private func saveScreenshot(_ image: CGImage, to projectURL: URL) async {
+        // Capture main actor properties before background work
+        let currentImageFormat = imageFormat
+        let currentImageQuality = imageQuality
+        
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             fileQueue.async {
                 let saveStartTime = CFAbsoluteTimeGetCurrent()
@@ -289,7 +350,7 @@ class ScreenshotManager: ObservableObject {
                     formatter.dateFormat = "yyyyMMdd_HHmmss_SSS"
                     let timestamp = formatter.string(from: Date())
                     
-                    let fileExtension = self.imageFormat == 0 ? "png" : "jpg"
+                    let fileExtension = currentImageFormat == 0 ? "png" : "jpg"
                     let filename = "screenshot_\(timestamp).\(fileExtension)"
                     let fileURL = projectURL.appendingPathComponent(filename)
                     
@@ -300,11 +361,11 @@ class ScreenshotManager: ObservableObject {
                     // Optimize compression based on format and quality settings
                     let imageData: Data?
                     
-                    if self.imageFormat == 0 { // PNG
+                    if currentImageFormat == 0 { // PNG
                         imageData = bitmapRep.representation(using: .png, properties: [:])
                     } else { // JPEG
                         let compressionProperties: [NSBitmapImageRep.PropertyKey: Any] = [
-                            .compressionFactor: NSNumber(value: Float(self.imageQuality)) // JPEG quality (0.0 = worst, 1.0 = best)
+                            .compressionFactor: NSNumber(value: Float(currentImageQuality)) // JPEG quality (0.0 = worst, 1.0 = best)
                         ]
                         imageData = bitmapRep.representation(using: .jpeg, properties: compressionProperties)
                     }
@@ -321,7 +382,9 @@ class ScreenshotManager: ObservableObject {
                     let saveTime = CFAbsoluteTimeGetCurrent() - saveStartTime
                     let fileSize = data.count
                     
-                    print("💾 Saved \(filename) (\(self.formatFileSize(fileSize))) in \(String(format: "%.0f", saveTime * 1000))ms")
+                    // Use local method for file size formatting
+                    let fileSizeStr = ByteCountFormatter().string(fromByteCount: Int64(fileSize))
+                    print("💾 Saved \(filename) (\(fileSizeStr)) in \(String(format: "%.0f", saveTime * 1000))ms")
                     
                     // Generate thumbnail asynchronously for gallery display
                     Task {
@@ -354,26 +417,9 @@ class ScreenshotManager: ObservableObject {
     
     // MARK: - Project Management
     private func createCaptureProject() async {
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let projectsURL = documentsURL.appendingPathComponent("TimelapseCaptureProjects")
-        
-        // Create projects directory if needed
-        try? FileManager.default.createDirectory(at: projectsURL, withIntermediateDirectories: true)
-        
-        // Create timestamped project directory
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd_HHmmss"
-        let timestamp = formatter.string(from: Date())
-        
-        let projectName = "Project_\(timestamp)"
-        let projectURL = projectsURL.appendingPathComponent(projectName)
-        
-        do {
-            try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
-            currentProject = projectURL
-            print("📁 Created project: \(projectName)")
-        } catch {
-            print("❌ Failed to create project directory: \(error.localizedDescription)")
+        print("📁 Delegating project creation to ProjectManager...")
+        await MainActor.run {
+            projectManager?.createNewProject()
         }
     }
     

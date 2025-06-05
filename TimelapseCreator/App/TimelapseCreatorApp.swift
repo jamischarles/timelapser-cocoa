@@ -25,6 +25,8 @@ struct TimelapseCreatorApp: App {
                 .onAppear {
                     // Connect thumbnail generator to screenshot manager
                     screenshotManager.setThumbnailGenerator(thumbnailGenerator)
+                    // Connect project manager to screenshot manager
+                    screenshotManager.setProjectManager(projectManager)
                 }
         }
         .windowStyle(.titleBar)

@@ -93,9 +93,7 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            Task {
-                await screenshotManager.checkPermissions()
-            }
+            screenshotManager.checkPermissions()
         }
     }
 }
@@ -168,7 +166,7 @@ struct CaptureView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // Capture controls
-                VStack {
+                VStack(spacing: 20) {
                     if screenshotManager.isCapturing {
                         Text("Capturing...")
                             .font(.title)
@@ -181,14 +179,32 @@ struct CaptureView: View {
                         ProgressView()
                             .scaleEffect(1.5)
                             .padding()
-                    } else {
-                        Text("Ready to Capture")
-                            .font(.title)
-                            .fontWeight(.medium)
                         
-                        Text("Configure your settings and start capturing")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        Button("Stop Capture") {
+                            Task {
+                                await screenshotManager.stopCapture()
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                    } else {
+                        VStack(spacing: 16) {
+                            Text("Ready to Capture")
+                                .font(.title)
+                                .fontWeight(.medium)
+                            
+                            Text("Configure your settings and start capturing")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            
+                            Button("Start Capture") {
+                                Task {
+                                    await screenshotManager.startCapture()
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
