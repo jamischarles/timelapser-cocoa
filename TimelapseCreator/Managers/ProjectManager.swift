@@ -17,7 +17,7 @@ class ProjectManager: ObservableObject {
     
     // MARK: - Private Properties
     private let fileManager = FileManager.default
-    private let documentsURL = FileManager.default.urls(for: .documentsDirectory, in: .userDomainMask).first!
+    private let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
     
     // MARK: - Initialization
     init() {

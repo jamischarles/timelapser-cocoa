@@ -13,13 +13,19 @@ struct TimelapseCreatorApp: App {
     // Shared app state
     @StateObject private var screenshotManager = ScreenshotManager()
     @StateObject private var projectManager = ProjectManager()
+    @StateObject private var thumbnailGenerator = ThumbnailGenerator()
     
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(screenshotManager)
                 .environmentObject(projectManager)
+                .environmentObject(thumbnailGenerator)
                 .frame(minWidth: 1000, minHeight: 700)
+                .onAppear {
+                    // Connect thumbnail generator to screenshot manager
+                    screenshotManager.setThumbnailGenerator(thumbnailGenerator)
+                }
         }
         .windowStyle(.titleBar)
         .windowResizability(.contentSize)
@@ -29,6 +35,7 @@ struct TimelapseCreatorApp: App {
             SettingsView()
                 .environmentObject(screenshotManager)
                 .environmentObject(projectManager)
+                .environmentObject(thumbnailGenerator)
         }
     }
 }
@@ -36,11 +43,15 @@ struct TimelapseCreatorApp: App {
 // MARK: - Settings View
 struct SettingsView: View {
     @EnvironmentObject var screenshotManager: ScreenshotManager
+    @EnvironmentObject var thumbnailGenerator: ThumbnailGenerator
     @AppStorage("captureInterval") private var captureInterval: Double = 5.0
     @AppStorage("captureAreaMode") private var captureAreaMode: Int = 0
     @AppStorage("imageFormat") private var imageFormat: Int = 0
     @AppStorage("imageQuality") private var imageQuality: Double = 0.8
+    @AppStorage("thumbnailSize") private var thumbnailSize: Double = 200
     @AppStorage("thumbnailQuality") private var thumbnailQuality: Double = 0.8
+    @AppStorage("enableThumbnailCache") private var enableThumbnailCache: Bool = true
+    @AppStorage("maxCacheSize") private var maxCacheSize: Int = 100
     @AppStorage("videoQuality") private var videoQuality: Double = 0.9
     
     var body: some View {
@@ -85,13 +96,54 @@ struct SettingsView: View {
                 }
                 
                 VStack(alignment: .leading) {
+                    Text("Video Quality: \(String(format: "%.0f", videoQuality * 100))%")
+                    Slider(value: $videoQuality, in: 0.1...1.0, step: 0.1)
+                }
+            }
+            
+            Section(header: Text("Thumbnail Settings")) {
+                VStack(alignment: .leading) {
+                    Text("Thumbnail Size: \(Int(thumbnailSize))px")
+                    Slider(value: $thumbnailSize, in: 100...400, step: 50)
+                        .onChange(of: thumbnailSize) { newValue in
+                            thumbnailGenerator.updateThumbnailSize(newValue)
+                        }
+                }
+                
+                VStack(alignment: .leading) {
                     Text("Thumbnail Quality: \(String(format: "%.0f", thumbnailQuality * 100))%")
                     Slider(value: $thumbnailQuality, in: 0.1...1.0, step: 0.1)
                 }
                 
-                VStack(alignment: .leading) {
-                    Text("Video Quality: \(String(format: "%.0f", videoQuality * 100))%")
-                    Slider(value: $videoQuality, in: 0.1...1.0, step: 0.1)
+                Toggle("Enable Thumbnail Cache", isOn: $enableThumbnailCache)
+                    .onChange(of: enableThumbnailCache) { newValue in
+                        thumbnailGenerator.updateCacheSettings(enabled: newValue, maxSize: maxCacheSize)
+                    }
+                
+                if enableThumbnailCache {
+                    VStack(alignment: .leading) {
+                        Text("Max Cache Size: \(maxCacheSize) items")
+                        Slider(value: Binding(
+                            get: { Double(maxCacheSize) },
+                            set: { maxCacheSize = Int($0) }
+                        ), in: 50...500, step: 50)
+                        .onChange(of: maxCacheSize) { newValue in
+                            thumbnailGenerator.updateCacheSettings(enabled: enableThumbnailCache, maxSize: newValue)
+                        }
+                    }
+                    
+                    let cacheStats = thumbnailGenerator.getCacheStats()
+                    HStack {
+                        Text("Cache Usage:")
+                        Text("\(cacheStats.thumbnailCount) thumbnails, \(cacheStats.estimatedMemory)")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Button("Clear Cache") {
+                            thumbnailGenerator.clearCache()
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.blue)
+                    }
                 }
             }
             

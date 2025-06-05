@@ -29,7 +29,7 @@ class ScreenshotManager: ObservableObject {
     
     // Capture settings
     @AppStorage("captureInterval") private var captureInterval: Double = 5.0
-    @AppStorage("selectedDisplayID") private var selectedDisplayID: CGDirectDisplayID = 0
+    @AppStorage("selectedDisplayID") private var selectedDisplayID: Int = 0
     @AppStorage("captureAreaMode") private var captureAreaMode: Int = 0 // 0 = full screen, 1 = main display, 2 = custom area
     @AppStorage("imageQuality") private var imageQuality: Double = 0.8
     @AppStorage("imageFormat") private var imageFormat: Int = 0 // 0 = PNG, 1 = JPEG
@@ -42,10 +42,18 @@ class ScreenshotManager: ObservableObject {
     private var captureStartTime: Date?
     private var lastCaptureDate: Date?
     
+    // Thumbnail generation
+    private var thumbnailGenerator: ThumbnailGenerator?
+    
     // MARK: - Initialization
     init() {
         checkPermissions()
         detectDisplays()
+    }
+    
+    // Method to set thumbnail generator (called from ContentView)
+    func setThumbnailGenerator(_ generator: ThumbnailGenerator) {
+        thumbnailGenerator = generator
     }
     
     // MARK: - Permission Management
@@ -72,7 +80,7 @@ class ScreenshotManager: ObservableObject {
             
             // Set default to main display if none selected
             if selectedDisplayID == 0 && !availableDisplays.isEmpty {
-                selectedDisplayID = CGMainDisplayID()
+                selectedDisplayID = Int(CGMainDisplayID())
             }
         }
     }
@@ -95,7 +103,7 @@ class ScreenshotManager: ObservableObject {
     
     // MARK: - Capture Configuration
     func setDisplayID(_ displayID: CGDirectDisplayID) {
-        selectedDisplayID = displayID
+        selectedDisplayID = Int(displayID)
         print("🖥️ Selected display: \(getDisplayName(displayID))")
     }
     
@@ -126,7 +134,7 @@ class ScreenshotManager: ObservableObject {
         
         // Start capture timer
         captureTimer = Timer.scheduledTimer(withTimeInterval: captureInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task {
                 await self?.captureScreenshot()
             }
         }
@@ -134,7 +142,7 @@ class ScreenshotManager: ObservableObject {
         // Start countdown timer for UI updates
         timeUntilNextCapture = captureInterval
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task {
                 await self?.updateCountdown()
             }
         }
@@ -207,7 +215,7 @@ class ScreenshotManager: ObservableObject {
             )
             
         case 1: // Main display only
-            let displayID = selectedDisplayID == 0 ? CGMainDisplayID() : selectedDisplayID
+            let displayID = selectedDisplayID == 0 ? CGMainDisplayID() : CGDirectDisplayID(selectedDisplayID)
             cgImage = CGDisplayCreateImage(displayID)
             
         default: // Custom area (future implementation)
@@ -237,7 +245,7 @@ class ScreenshotManager: ObservableObject {
     }
     
     private func saveScreenshot(_ image: CGImage, to projectURL: URL) async {
-        await withCheckedContinuation { continuation in
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             fileQueue.async {
                 let saveStartTime = CFAbsoluteTimeGetCurrent()
                 
@@ -257,16 +265,12 @@ class ScreenshotManager: ObservableObject {
                     
                     // Optimize compression based on format and quality settings
                     let imageData: Data?
-                    let compressionProperties: [NSBitmapImageRep.PropertyKey: Any]
                     
                     if self.imageFormat == 0 { // PNG
-                        compressionProperties = [
-                            .compressionLevel: Float(1.0 - self.imageQuality) // PNG compression (0.0 = best, 1.0 = fastest)
-                        ]
-                        imageData = bitmapRep.representation(using: .png, properties: compressionProperties)
+                        imageData = bitmapRep.representation(using: .png, properties: [:])
                     } else { // JPEG
-                        compressionProperties = [
-                            .compressionLevel: Float(self.imageQuality) // JPEG quality (0.0 = worst, 1.0 = best)
+                        let compressionProperties: [NSBitmapImageRep.PropertyKey: Any] = [
+                            .compressionFactor: NSNumber(value: Float(self.imageQuality)) // JPEG quality (0.0 = worst, 1.0 = best)
                         ]
                         imageData = bitmapRep.representation(using: .jpeg, properties: compressionProperties)
                     }
@@ -285,7 +289,10 @@ class ScreenshotManager: ObservableObject {
                     
                     print("💾 Saved \(filename) (\(self.formatFileSize(fileSize))) in \(String(format: "%.0f", saveTime * 1000))ms")
                     
-                    // TODO: Generate thumbnail (Task 3)
+                    // Generate thumbnail asynchronously for gallery display
+                    Task {
+                        await self.generateThumbnailAsync(for: fileURL)
+                    }
                     
                 } catch {
                     print("❌ Failed to save screenshot: \(error.localizedDescription)")
@@ -313,7 +320,7 @@ class ScreenshotManager: ObservableObject {
     
     // MARK: - Project Management
     private func createCaptureProject() async {
-        let documentsURL = FileManager.default.urls(for: .documentsDirectory, in: .userDomainMask).first!
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let projectsURL = documentsURL.appendingPathComponent("TimelapseCaptureProjects")
         
         // Create projects directory if needed
@@ -345,6 +352,21 @@ class ScreenshotManager: ObservableObject {
             timeUntilNextCapture = max(0, captureInterval - elapsed)
         } else {
             timeUntilNextCapture = captureInterval
+        }
+    }
+    
+    // MARK: - Thumbnail Generation
+    private func generateThumbnailAsync(for imageURL: URL) async {
+        guard let thumbnailGenerator = thumbnailGenerator else {
+            print("⚠️ ThumbnailGenerator not available for \(imageURL.lastPathComponent)")
+            return
+        }
+        
+        do {
+            let _ = try await thumbnailGenerator.generateThumbnail(from: imageURL)
+            print("🖼️ Thumbnail generated for \(imageURL.lastPathComponent)")
+        } catch {
+            print("❌ Failed to generate thumbnail for \(imageURL.lastPathComponent): \(error.localizedDescription)")
         }
     }
     
