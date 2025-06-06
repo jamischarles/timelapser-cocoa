@@ -248,6 +248,27 @@ class ScreenshotManager: ObservableObject {
         }
     }
     
+    private func getCombinedDisplayBounds() -> CGRect {
+        var combinedBounds = CGRect.null
+        
+        for displayID in availableDisplays {
+            let displayBounds = CGDisplayBounds(displayID)
+            if combinedBounds.isNull {
+                combinedBounds = displayBounds
+            } else {
+                combinedBounds = combinedBounds.union(displayBounds)
+            }
+        }
+        
+        // If no displays detected, fallback to main display bounds
+        if combinedBounds.isNull {
+            combinedBounds = CGDisplayBounds(CGMainDisplayID())
+        }
+        
+        print("📏 Combined display bounds: \(combinedBounds)")
+        return combinedBounds
+    }
+    
     // MARK: - Capture Configuration
     func setDisplayID(_ displayID: CGDirectDisplayID) {
         selectedDisplayID = Int(displayID)
@@ -394,12 +415,33 @@ class ScreenshotManager: ObservableObject {
         switch _captureAreaMode {
         case 0: // Full screen (all displays)
             print("🎯 Full screen capture using Core Graphics")
+            // Try multiple approaches to capture all displays
+            
+            // First attempt: Use CGRect.infinite to capture all displays
             cgImage = CGWindowListCreateImage(
-                .null,
+                CGRect.infinite,
                 .optionOnScreenOnly,
                 kCGNullWindowID,
                 .bestResolution
             )
+            
+            // Fallback: If infinite rect doesn't work, calculate combined display bounds
+            if cgImage == nil {
+                print("⚠️ Infinite rect capture failed, trying combined display bounds...")
+                let combinedBounds = getCombinedDisplayBounds()
+                cgImage = CGWindowListCreateImage(
+                    combinedBounds,
+                    .optionOnScreenOnly,
+                    kCGNullWindowID,
+                    .bestResolution
+                )
+            }
+            
+            // Final fallback: Use main display capture
+            if cgImage == nil {
+                print("⚠️ Combined bounds capture failed, falling back to main display...")
+                cgImage = CGDisplayCreateImage(CGMainDisplayID())
+            }
 
         case 1: // Main display only
             let displayID = selectedDisplayID == 0 ? CGMainDisplayID() : CGDirectDisplayID(selectedDisplayID)

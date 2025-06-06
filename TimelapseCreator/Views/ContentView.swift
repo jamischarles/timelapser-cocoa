@@ -697,10 +697,405 @@ struct GalleryView: View {
 }
 
 struct ProjectsView: View {
+    @EnvironmentObject var projectManager: ProjectManager
+    @State private var selectedProjects: Set<UUID> = []
+    @State private var showingDeleteAlert = false
+    @State private var showingPurgeAlert = false
+    @State private var totalStorageUsed: Int64 = 0
+    @State private var isCalculatingStorage = false
+    
     var body: some View {
-        Text("Projects View - Coming Soon")
-            .font(.title)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 0) {
+            // Header with storage info and actions
+            headerView
+            
+            Divider()
+            
+            // Projects list
+            if projectManager.projects.isEmpty {
+                emptyStateView
+            } else {
+                projectsListView
+            }
+        }
+        .onAppear {
+            calculateTotalStorage()
+        }
+        .alert("Delete Selected Projects", isPresented: $showingDeleteAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                deleteSelectedProjects()
+            }
+        } message: {
+            Text("This will permanently delete \(selectedProjects.count) project(s) and all their screenshots. This action cannot be undone.")
+        }
+        .alert("Purge All Projects", isPresented: $showingPurgeAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge All", role: .destructive) {
+                purgeAllProjects()
+            }
+        } message: {
+            Text("This will permanently delete ALL projects and screenshots, freeing up \(bytesToHumanReadable(totalStorageUsed)) of storage. This action cannot be undone.")
+        }
+    }
+    
+    private var headerView: some View {
+        VStack(spacing: 12) {
+            HStack {
+                VStack(alignment: .leading) {
+                    Text("Project Manager")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    
+                    if isCalculatingStorage {
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Calculating storage...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else {
+                        Text("\(projectManager.projects.count) projects • \(bytesToHumanReadable(totalStorageUsed)) used")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                HStack(spacing: 8) {
+                    // Refresh button
+                    Button {
+                        refreshProjects()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Refresh projects")
+                    
+                    // Selection controls
+                    if !selectedProjects.isEmpty {
+                        Button("Delete Selected") {
+                            showingDeleteAlert = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        
+                        Button("Deselect All") {
+                            selectedProjects.removeAll()
+                        }
+                        .buttonStyle(.bordered)
+                    } else if !projectManager.projects.isEmpty {
+                        Button("Select All") {
+                            selectedProjects = Set(projectManager.projects.map(\.id))
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Button("Purge All") {
+                            showingPurgeAlert = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                    }
+                }
+            }
+            
+            // Selection summary bar
+            if !selectedProjects.isEmpty {
+                HStack {
+                    Text("\(selectedProjects.count) project(s) selected")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Text("~\(bytesToHumanReadable(calculateSelectedProjectsSize())) to be freed")
+                        .font(.subheadline)
+                        .foregroundColor(.orange)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(8)
+            }
+        }
+        .padding()
+    }
+    
+    private var emptyStateView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "folder")
+                .font(.system(size: 48))
+                .foregroundColor(.secondary)
+            
+            Text("No Projects Yet")
+                .font(.title2)
+                .fontWeight(.medium)
+            
+            Text("Create your first project to start capturing screenshots")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            
+            Button("Create New Project") {
+                projectManager.createNewProject()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    private var projectsListView: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(projectManager.projects) { project in
+                    ProjectRowView(
+                        project: project,
+                        isSelected: selectedProjects.contains(project.id),
+                        onToggleSelection: {
+                            if selectedProjects.contains(project.id) {
+                                selectedProjects.remove(project.id)
+                            } else {
+                                selectedProjects.insert(project.id)
+                            }
+                        },
+                        onDelete: {
+                            projectManager.deleteProject(project)
+                            selectedProjects.remove(project.id)
+                            calculateTotalStorage()
+                        }
+                    )
+                }
+            }
+            .padding()
+        }
+    }
+    
+    private func refreshProjects() {
+        projectManager.refreshProjects()
+        calculateTotalStorage()
+    }
+    
+    private func calculateTotalStorage() {
+        isCalculatingStorage = true
+        Task {
+            var total: Int64 = 0
+            
+            for project in projectManager.projects {
+                total += getDirectorySize(project.url)
+            }
+            
+            await MainActor.run {
+                totalStorageUsed = total
+                isCalculatingStorage = false
+            }
+        }
+    }
+    
+    private func calculateSelectedProjectsSize() -> Int64 {
+        var total: Int64 = 0
+        let selectedProjectsList = projectManager.projects.filter { selectedProjects.contains($0.id) }
+        
+        for project in selectedProjectsList {
+            total += getDirectorySize(project.url)
+        }
+        
+        return total
+    }
+    
+    private func deleteSelectedProjects() {
+        let projectsToDelete = projectManager.projects.filter { selectedProjects.contains($0.id) }
+        projectManager.deleteProjects(projectsToDelete)
+        selectedProjects.removeAll()
+        calculateTotalStorage()
+    }
+    
+    private func purgeAllProjects() {
+        projectManager.purgeAllProjects()
+        selectedProjects.removeAll()
+        totalStorageUsed = 0
+    }
+    
+    private func getDirectorySize(_ url: URL) -> Int64 {
+        var totalSize: Int64 = 0
+        
+        if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) {
+            for case let fileURL as URL in enumerator {
+                do {
+                    let resourceValues = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+                    if let fileSize = resourceValues.fileSize {
+                        totalSize += Int64(fileSize)
+                    }
+                } catch {
+                    // Skip files we can't read
+                }
+            }
+        }
+        
+        return totalSize
+    }
+    
+    private func bytesToHumanReadable(_ bytes: Int64) -> String {
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        var size = Double(bytes)
+        var unitIndex = 0
+        
+        while size >= 1024 && unitIndex < units.count - 1 {
+            size /= 1024
+            unitIndex += 1
+        }
+        
+        return String(format: "%.1f %@", size, units[unitIndex])
+    }
+}
+
+struct ProjectRowView: View {
+    let project: Project
+    let isSelected: Bool
+    let onToggleSelection: () -> Void
+    let onDelete: () -> Void
+    
+    @State private var projectSize: Int64 = 0
+    @State private var isCalculatingSize = false
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            // Selection checkbox
+            Button {
+                onToggleSelection()
+            } label: {
+                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                    .foregroundColor(isSelected ? .accentColor : .secondary)
+                    .font(.title3)
+            }
+            .buttonStyle(.plain)
+            
+            // Project icon
+            Image(systemName: "folder.fill")
+                .font(.title2)
+                .foregroundColor(.accentColor)
+            
+            // Project details
+            VStack(alignment: .leading, spacing: 4) {
+                Text(project.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                
+                HStack {
+                    Text("\(project.screenshotCount) screenshots")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Text("•")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    if isCalculatingSize {
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                            Text("calculating...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else {
+                        Text(bytesToHumanReadable(projectSize))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Text("•")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Text(formatDate(project.createdAt))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            // Quick actions
+            HStack(spacing: 8) {
+                Button {
+                    NSWorkspace.shared.open(project.url)
+                } label: {
+                    Image(systemName: "folder.badge.gearshape")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Open in Finder")
+                
+                Button {
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+                .help("Delete project")
+            }
+        }
+        .padding()
+        .background(isSelected ? Color.accentColor.opacity(0.1) : Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+        .onAppear {
+            calculateProjectSize()
+        }
+    }
+    
+    private func calculateProjectSize() {
+        isCalculatingSize = true
+        Task {
+            let size = getDirectorySize(project.url)
+            await MainActor.run {
+                projectSize = size
+                isCalculatingSize = false
+            }
+        }
+    }
+    
+    private func getDirectorySize(_ url: URL) -> Int64 {
+        var totalSize: Int64 = 0
+        
+        if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) {
+            for case let fileURL as URL in enumerator {
+                do {
+                    let resourceValues = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+                    if let fileSize = resourceValues.fileSize {
+                        totalSize += Int64(fileSize)
+                    }
+                } catch {
+                    // Skip files we can't read
+                }
+            }
+        }
+        
+        return totalSize
+    }
+    
+    private func bytesToHumanReadable(_ bytes: Int64) -> String {
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        var size = Double(bytes)
+        var unitIndex = 0
+        
+        while size >= 1024 && unitIndex < units.count - 1 {
+            size /= 1024
+            unitIndex += 1
+        }
+        
+        return String(format: "%.1f %@", size, units[unitIndex])
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }
 

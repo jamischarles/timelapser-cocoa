@@ -45,8 +45,77 @@ class ProjectManager: ObservableObject {
         }
     }
     
+    func refreshProjects() {
+        loadProjects()
+    }
+    
+    func deleteProject(_ project: Project) {
+        print("🔍 Attempting to delete project: \(project.name) at \(project.url.path)")
+        print("🔍 Current projects count: \(projects.count)")
+        
+        do {
+            // Check if directory exists before deletion
+            if fileManager.fileExists(atPath: project.url.path) {
+                print("🔍 Directory exists, attempting deletion...")
+                try fileManager.removeItem(at: project.url)
+                print("✅ Successfully deleted directory")
+            } else {
+                print("⚠️ Directory doesn't exist at path: \(project.url.path)")
+            }
+            
+            // Find and remove from projects array
+            if let index = projects.firstIndex(of: project) {
+                print("🔍 Found project at index \(index), removing from array...")
+                projects.remove(at: index)
+                print("✅ Removed from projects array. New count: \(projects.count)")
+            } else {
+                print("❌ Could not find project in projects array")
+                // Debug: print all project names and IDs
+                print("🔍 Current projects:")
+                for (i, p) in projects.enumerated() {
+                    print("  [\(i)] \(p.name) - ID: \(p.id)")
+                }
+                print("🔍 Target project: \(project.name) - ID: \(project.id)")
+            }
+            
+            // Clear current project if it was deleted
+            if currentProject?.id == project.id {
+                currentProject = nil
+                print("🔍 Cleared current project")
+            }
+            
+            print("🗑️ Deleted project: \(project.name)")
+        } catch {
+            print("❌ Failed to delete project \(project.name): \(error.localizedDescription)")
+        }
+    }
+    
+    func deleteProjects(_ projectsToDelete: [Project]) {
+        for project in projectsToDelete {
+            deleteProject(project)
+        }
+    }
+    
+    func purgeAllProjects() {
+        let projectsURL = downloadsURL.appendingPathComponent("TimelapseCaptureProjects")
+        
+        do {
+            try fileManager.removeItem(at: projectsURL)
+            projects.removeAll()
+            currentProject = nil
+            print("🧹 Purged all projects")
+        } catch {
+            print("❌ Failed to purge projects: \(error.localizedDescription)")
+        }
+    }
+    
     private func loadProjects() {
         let projectsURL = downloadsURL.appendingPathComponent("TimelapseCaptureProjects")
+        
+        guard fileManager.fileExists(atPath: projectsURL.path) else {
+            projects = []
+            return
+        }
         
         do {
             let projectDirectories = try fileManager.contentsOfDirectory(at: projectsURL, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles)
@@ -62,6 +131,7 @@ class ProjectManager: ObservableObject {
             
         } catch {
             print("⚠️ Could not load projects: \(error.localizedDescription)")
+            projects = []
         }
     }
 }
@@ -80,7 +150,10 @@ struct Project: Identifiable, Equatable {
     var screenshotCount: Int {
         do {
             let contents = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
-            return contents.filter { $0.pathExtension == "png" || $0.pathExtension == "jpg" }.count
+            return contents.filter { 
+                let ext = $0.pathExtension.lowercased()
+                return ext == "png" || ext == "jpg" || ext == "jpeg"
+            }.count
         } catch {
             return 0
         }
