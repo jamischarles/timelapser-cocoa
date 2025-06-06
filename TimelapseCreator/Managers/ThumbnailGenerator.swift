@@ -33,16 +33,16 @@ class ThumbnailGenerator: ObservableObject {
     private var totalGenerationTime: Double = 0
     
     // Settings
-    @AppStorage("thumbnailSize") private var thumbnailSize: Double = 200
+    @AppStorage("thumbnailSize") private var thumbnailSize: Double = 150 // Reduced from 200 for faster generation
     @AppStorage("thumbnailQuality") private var thumbnailQuality: Double = 0.8
     @AppStorage("enableThumbnailCache") private var enableThumbnailCache: Bool = true
     @AppStorage("maxCacheSize") private var maxCacheSize: Int = 100
     
     // MARK: - Initialization
     init() {
-        // Create Core Image context optimized for hardware acceleration
+        // Create Core Image context optimized for memory efficiency over speed
         let contextOptions: [CIContextOption: Any] = [
-            .useSoftwareRenderer: false,  // Force hardware acceleration
+            .useSoftwareRenderer: true,   // Use software rendering to reduce system log noise
             .workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB),
             .cacheIntermediates: false    // Don't cache intermediates for memory efficiency
         ]

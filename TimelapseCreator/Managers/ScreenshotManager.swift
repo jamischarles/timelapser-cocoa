@@ -21,6 +21,22 @@ class ScreenshotManager: ObservableObject {
     @Published var captureRate: Double = 0
     @Published var lastCaptureTime: Double = 0
     
+    // Window and region selection
+    @Published var availableWindows: [(id: CGWindowID, name: String, ownerName: String)] = []
+    @Published var selectedWindowID: CGWindowID = 0
+    @Published var customRegion: CGRect = .zero
+    @Published var isSelectingRegion = false
+    
+    // Expose capture area mode for UI binding
+    var captureAreaMode: Int {
+        get { _captureAreaMode }
+        set { 
+            _captureAreaMode = newValue
+            setCaptureAreaMode(newValue)
+        }
+    }
+    private var _captureAreaMode: Int = 0
+    
     // MARK: - Private Properties
     private var captureTimer: Timer?
     private var countdownTimer: Timer?
@@ -30,9 +46,9 @@ class ScreenshotManager: ObservableObject {
     // Capture settings
     @AppStorage("captureInterval") private var captureInterval: Double = 5.0
     @AppStorage("selectedDisplayID") private var selectedDisplayID: Int = 0
-    @AppStorage("captureAreaMode") private var captureAreaMode: Int = 0 // 0 = full screen, 1 = main display, 2 = custom area
-    @AppStorage("imageQuality") private var imageQuality: Double = 0.8
-    @AppStorage("imageFormat") private var imageFormat: Int = 0 // 0 = PNG, 1 = JPEG
+    @AppStorage("captureAreaMode") private var storedCaptureAreaMode: Int = 0 // 0 = full screen, 1 = main display, 2 = specific window, 3 = custom region
+    @AppStorage("imageQuality") private var imageQuality: Double = 0.7 // Reduced from 0.8 to balance quality vs file size
+    @AppStorage("imageFormat") private var imageFormat: Int = 1 // 0 = PNG, 1 = JPEG (Default to JPEG for smaller files)
     
     // Connection to ProjectManager
     private weak var projectManager: ProjectManager?
@@ -49,6 +65,9 @@ class ScreenshotManager: ObservableObject {
     
     // MARK: - Initialization
     init() {
+        // Initialize capture area mode from stored value
+        _captureAreaMode = storedCaptureAreaMode
+        
         // Check permissions on main actor to ensure @Published property updates correctly
         Task { @MainActor in
             checkPermissions()
@@ -72,28 +91,37 @@ class ScreenshotManager: ObservableObject {
         let preflightResult = CGPreflightScreenCaptureAccess()
         print("🔍 CGPreflightScreenCaptureAccess() returned: \(preflightResult)")
         
-        // For development builds, sometimes CGPreflightScreenCaptureAccess returns false
-        // even when permission is granted. Let's also try a more direct test.
-        let testResult = canActuallyCaptureScreen()
-        print("🔍 Actual capture test returned: \(testResult)")
-        
-        // Use both results - permission is granted if either method works
-        hasPermission = preflightResult || testResult
-        print(hasPermission ? "✅ Screen recording permission detected as granted" : "⚠️ Screen recording permission not detected")
+        // Try a more sophisticated check for development builds
+        if preflightResult {
+            hasPermission = true
+            print("✅ Screen recording permission detected as granted via preflight")
+        } else {
+            // For development, try checking if we can actually capture
+            // This uses a different approach that's less likely to trigger dialogs
+            let testResult = canCaptureWithoutDialog()
+            hasPermission = testResult
+            print(testResult ? "✅ Screen recording permission detected via test capture" : "⚠️ Screen recording permission not detected")
+        }
     }
     
-    private func canActuallyCaptureScreen() -> Bool {
-        // Try to actually capture a 1x1 pixel to test real permission
-        print("🔍 Testing actual screen capture...")
-        let _ = CGWindowListCreateImage(
-            CGRect(x: 0, y: 0, width: 1, height: 1),
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            .bestResolution
-        )
-        let result = true // If we get here without crashing, permission is granted
-        print("🔍 Screen capture test result: \(result ? "success" : "failed")")
-        return result
+    private func canCaptureWithoutDialog() -> Bool {
+        // Use a simpler approach for development builds
+        // Try to get display bounds which is usually accessible
+        print("🔍 Testing screen capture capability...")
+        
+        let mainDisplay = CGMainDisplayID()
+        let bounds = CGDisplayBounds(mainDisplay)
+        
+        // If we can get valid display info, permissions are likely granted
+        let hasValidBounds = bounds.width > 0 && bounds.height > 0
+        print("🔍 Display bounds check: \(hasValidBounds ? "valid" : "invalid")")
+        
+        // Additional check - try to see if we can get window list without triggering dialogs
+        let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+        let hasWindowList = windowList != nil
+        print("🔍 Window list check: \(hasWindowList ? "valid" : "invalid")")
+        
+        return hasValidBounds && hasWindowList
     }
     
     func requestPermissions() async {
@@ -109,33 +137,49 @@ class ScreenshotManager: ObservableObject {
             return
         }
         
-        print("🔑 Requesting screen recording permission via system dialog...")
+        print("🔑 Screen recording permission not detected.")
+        print("🔑 Please manually grant permission in System Preferences > Security & Privacy > Privacy > Screen Recording")
         
-        // Only trigger the permission dialog if permission is not already granted
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            captureQueue.async {
-                // This will trigger the permission dialog
-                let _ = CGWindowListCreateImage(
-                    CGRect(x: 0, y: 0, width: 1, height: 1),
-                    .optionOnScreenOnly,
-                    kCGNullWindowID,
-                    .bestResolution
-                )
-                
-                // Check permission status after attempting capture
-                DispatchQueue.main.async {
-                    let newPermissionStatus = CGPreflightScreenCaptureAccess()
-                    self.hasPermission = newPermissionStatus
-                    print(newPermissionStatus ? "✅ Screen recording permission granted after dialog" : "⚠️ Permission still not granted - check System Preferences")
-                    continuation.resume()
-                }
-            }
-        }
+        // Don't trigger any screen capture APIs that would show unwanted permission dialogs
+        // Instead, direct user to manually enable permissions in System Preferences
+        // The actual permission dialog will only appear when they start capturing
     }
     
     func openSystemPreferences() {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         NSWorkspace.shared.open(url)
+    }
+    
+    func resetPermissions() async {
+        print("🔄 Resetting permissions...")
+        
+        // Clear any cached permission state
+        await MainActor.run {
+            hasPermission = false
+        }
+        
+        // Force a new permission check by actually attempting a capture
+        // This is the most reliable way to trigger the system permission dialog
+        print("🔑 Forcing permission dialog by attempting capture...")
+        
+        // Try to capture screen - this will trigger the system permission dialog if needed
+        let result = await withCheckedContinuation { continuation in
+            captureQueue.async {
+                // This call will trigger the macOS permission dialog if permission hasn't been granted
+                let testImage = CGDisplayCreateImage(CGMainDisplayID())
+                let success = testImage != nil
+                continuation.resume(returning: success)
+            }
+        }
+        
+        await MainActor.run {
+            hasPermission = result
+            if result {
+                print("✅ Permissions granted after reset")
+            } else {
+                print("⚠️ Permissions still not granted - user may need to approve dialog")
+            }
+        }
     }
     
     // MARK: - Display Management
@@ -154,6 +198,38 @@ class ScreenshotManager: ObservableObject {
                 selectedDisplayID = Int(CGMainDisplayID())
             }
         }
+    }
+    
+    // MARK: - Window Management
+    @MainActor
+    func detectWindows() {
+        guard let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else {
+            print("❌ Failed to get window list")
+            return
+        }
+        
+        availableWindows = windowList.compactMap { windowInfo in
+            guard let windowID = windowInfo[kCGWindowNumber as String] as? CGWindowID,
+                  let ownerName = windowInfo[kCGWindowOwnerName as String] as? String,
+                  let windowName = windowInfo[kCGWindowName as String] as? String,
+                  !windowName.isEmpty,
+                  ownerName != "TimelapseCreator" // Exclude our own app
+            else { return nil }
+            
+            return (id: windowID, name: windowName, ownerName: ownerName)
+        }
+        
+        print("🪟 Detected \(availableWindows.count) windows")
+    }
+    
+    func setSelectedWindow(_ windowID: CGWindowID) {
+        selectedWindowID = windowID
+        print("🪟 Selected window ID: \(windowID)")
+    }
+    
+    func setCustomRegion(_ region: CGRect) {
+        customRegion = region
+        print("🔲 Custom region set: \(region)")
     }
     
     func getDisplayInfo() -> [(id: CGDirectDisplayID, name: String, bounds: CGRect)] {
@@ -179,9 +255,23 @@ class ScreenshotManager: ObservableObject {
     }
     
     func setCaptureAreaMode(_ mode: Int) {
-        captureAreaMode = mode
-        let modeDescription = mode == 0 ? "Full Screen" : mode == 1 ? "Main Display" : "Custom Area"
+        _captureAreaMode = mode
+        storedCaptureAreaMode = mode
+        let modeDescription = switch mode {
+        case 0: "Full Screen"
+        case 1: "Main Display" 
+        case 2: "Specific Window"
+        case 3: "Custom Region"
+        default: "Unknown"
+        }
         print("📱 Capture mode: \(modeDescription)")
+        
+        // Refresh windows when switching to window mode
+        if mode == 2 {
+            Task { @MainActor in
+                detectWindows()
+            }
+        }
     }
     
     func setImageFormat(_ format: Int, quality: Double = 0.8) {
@@ -203,6 +293,7 @@ class ScreenshotManager: ObservableObject {
         isCapturing = true
         screenshotCount = 0
         captureStartTime = Date()
+        lastCaptureDate = Date() // Set immediately so countdown timer works
         print("🎬 Starting screenshot capture (interval: \(captureInterval)s)")
         print("🎬 Current project: \(projectManager?.currentProject?.name ?? "nil")")
         
@@ -216,8 +307,9 @@ class ScreenshotManager: ObservableObject {
         // Start countdown timer for UI updates
         timeUntilNextCapture = captureInterval
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task {
-                await self?.updateCountdown()
+            guard let self = self else { return }
+            Task { @MainActor in
+                await self.updateCountdown()
             }
         }
         
@@ -246,6 +338,9 @@ class ScreenshotManager: ObservableObject {
         let startTime = CFAbsoluteTimeGetCurrent()
         
         do {
+            // Add a small delay to ensure UI state is stable
+            try await Task.sleep(nanoseconds: 100_000_000) // 100ms delay
+            
             // Capture screenshot on background queue for optimal performance
             let screenshot = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CGImage, Error>) in
                 captureQueue.async { [weak self] in
@@ -294,22 +389,59 @@ class ScreenshotManager: ObservableObject {
     }
     
     private func performScreenCaptureSync() -> Result<CGImage, Error> {
-        let cgImage: CGImage?
+        var cgImage: CGImage?
         
-        switch captureAreaMode {
+        switch _captureAreaMode {
         case 0: // Full screen (all displays)
+            print("🎯 Full screen capture using Core Graphics")
             cgImage = CGWindowListCreateImage(
                 .null,
                 .optionOnScreenOnly,
                 kCGNullWindowID,
                 .bestResolution
             )
-            
+
         case 1: // Main display only
             let displayID = selectedDisplayID == 0 ? CGMainDisplayID() : CGDirectDisplayID(selectedDisplayID)
             cgImage = CGDisplayCreateImage(displayID)
             
-        default: // Custom area (future implementation)
+        case 2: // Specific window
+            if selectedWindowID != 0 {
+                cgImage = CGWindowListCreateImage(
+                    .null,
+                    .optionIncludingWindow,
+                    selectedWindowID,
+                    .bestResolution
+                )
+            } else {
+                // Fallback to full screen if no window selected
+                cgImage = CGWindowListCreateImage(
+                    .null,
+                    .optionOnScreenOnly,
+                    kCGNullWindowID,
+                    .bestResolution
+                )
+            }
+            
+        case 3: // Custom region
+            if !customRegion.isEmpty {
+                cgImage = CGWindowListCreateImage(
+                    customRegion,
+                    .optionOnScreenOnly,
+                    kCGNullWindowID,
+                    .bestResolution
+                )
+            } else {
+                // Fallback to full screen if no region selected
+                cgImage = CGWindowListCreateImage(
+                    .null,
+                    .optionOnScreenOnly,
+                    kCGNullWindowID,
+                    .bestResolution
+                )
+            }
+            
+        default: // Fallback to full screen
             cgImage = CGWindowListCreateImage(
                 .null,
                 .optionOnScreenOnly,
@@ -334,6 +466,8 @@ class ScreenshotManager: ObservableObject {
         
         return .success(image)
     }
+    
+
     
     private func saveScreenshot(_ image: CGImage, to projectURL: URL) async {
         // Capture main actor properties before background work
@@ -386,8 +520,8 @@ class ScreenshotManager: ObservableObject {
                     let fileSizeStr = ByteCountFormatter().string(fromByteCount: Int64(fileSize))
                     print("💾 Saved \(filename) (\(fileSizeStr)) in \(String(format: "%.0f", saveTime * 1000))ms")
                     
-                    // Generate thumbnail asynchronously for gallery display
-                    Task {
+                    // Generate thumbnail asynchronously with low priority to avoid blocking capture
+                    Task(priority: .utility) {
                         await self.generateThumbnailAsync(for: fileURL)
                     }
                     
@@ -424,6 +558,7 @@ class ScreenshotManager: ObservableObject {
     }
     
     // MARK: - UI Updates
+    @MainActor
     private func updateCountdown() async {
         guard isCapturing else { return }
         

@@ -104,6 +104,16 @@ struct CaptureView: View {
     @EnvironmentObject var screenshotManager: ScreenshotManager
     @EnvironmentObject var projectManager: ProjectManager
     
+    private func getCurrentCaptureMode() -> String {
+        switch screenshotManager.captureAreaMode {
+        case 0: return "Full Screen"
+        case 1: return "Main Display"
+        case 2: return "Specific Window"
+        case 3: return "Custom Region"
+        default: return "Unknown"
+        }
+    }
+    
     var body: some View {
         VStack(spacing: 20) {
             // Status header
@@ -131,84 +141,134 @@ struct CaptureView: View {
             .background(Color(NSColor.controlBackgroundColor))
             .cornerRadius(8)
             
-            // Permission status
+            // Compact permission warning (only show if permission actually missing)
             if !screenshotManager.hasPermission {
-                VStack {
+                HStack {
                     Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
                         .foregroundColor(.orange)
                     
-                    Text("Screen Recording Permission Required")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    
-                    Text("Please grant screen recording permission in System Preferences > Security & Privacy > Privacy > Screen Recording")
-                        .multilineTextAlignment(.center)
+                    Text("Screen recording permission required for capture")
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
                     
-                    VStack(spacing: 12) {
-                        Button("Request Permission") {
+                    Spacer()
+                    
+                    Button("Fix in Settings") {
+                        screenshotManager.openSystemPreferences()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .padding()
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(8)
+            }
+            
+            // Quick capture mode selector
+            VStack {
+                HStack {
+                    Text("Capture Mode:")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Menu {
+                        Button("Full Screen") {
+                            screenshotManager.setCaptureAreaMode(0)
+                        }
+                        Button("Main Display") {
+                            screenshotManager.setCaptureAreaMode(1)
+                        }
+                        Button("Specific Window") {
+                            screenshotManager.setCaptureAreaMode(2)
+                        }
+                        Button("Custom Region") {
+                            screenshotManager.setCaptureAreaMode(3)
+                        }
+                    } label: {
+                        HStack {
+                            Text(getCurrentCaptureMode())
+                            Image(systemName: "chevron.down")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                
+                // Show current selection details
+                if getCurrentCaptureMode() == "Specific Window" {
+                    if screenshotManager.selectedWindowID != 0 {
+                        if let selectedWindow = screenshotManager.availableWindows.first(where: { $0.id == screenshotManager.selectedWindowID }) {
+                            Text("📱 \(selectedWindow.name) (\(selectedWindow.ownerName))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else {
+                        Text("⚠️ No window selected - configure in Settings")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                } else if getCurrentCaptureMode() == "Custom Region" {
+                    if !screenshotManager.customRegion.isEmpty {
+                        Text("🔲 \(Int(screenshotManager.customRegion.width))×\(Int(screenshotManager.customRegion.height))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("⚠️ No region selected - configure in Settings")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                }
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(8)
+            
+            // Capture controls (always show, disable if no permission)
+            VStack(spacing: 20) {
+                if screenshotManager.isCapturing {
+                    Text("Capturing...")
+                        .font(.title)
+                        .fontWeight(.medium)
+                    
+                    Text("Next screenshot in \(String(format: "%.1f", screenshotManager.timeUntilNextCapture))s")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    ProgressView()
+                        .scaleEffect(1.5)
+                        .padding()
+                    
+                    Button("Stop Capture") {
+                        Task {
+                            await screenshotManager.stopCapture()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                } else {
+                    VStack(spacing: 16) {
+                        Text("Ready to Capture")
+                            .font(.title)
+                            .fontWeight(.medium)
+                        
+                        Text("Configure your settings and start capturing")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        
+                        Button("Start Capture") {
                             Task {
-                                await screenshotManager.requestPermissions()
+                                await screenshotManager.startCapture()
                             }
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        
-                        Button("Open System Preferences") {
-                            screenshotManager.openSystemPreferences()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
+                        .disabled(!screenshotManager.hasPermission)
                     }
                 }
-                .padding()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // Capture controls
-                VStack(spacing: 20) {
-                    if screenshotManager.isCapturing {
-                        Text("Capturing...")
-                            .font(.title)
-                            .fontWeight(.medium)
-                        
-                        Text("Next screenshot in \(String(format: "%.1f", screenshotManager.timeUntilNextCapture))s")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .padding()
-                        
-                        Button("Stop Capture") {
-                            Task {
-                                await screenshotManager.stopCapture()
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                    } else {
-                        VStack(spacing: 16) {
-                            Text("Ready to Capture")
-                                .font(.title)
-                                .fontWeight(.medium)
-                            
-                            Text("Configure your settings and start capturing")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            
-                            Button("Start Capture") {
-                                Task {
-                                    await screenshotManager.startCapture()
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding()
     }
@@ -217,12 +277,14 @@ struct CaptureView: View {
 struct GalleryView: View {
     @EnvironmentObject var projectManager: ProjectManager
     @EnvironmentObject var thumbnailGenerator: ThumbnailGenerator
+    @EnvironmentObject var videoGenerator: VideoGenerator
     @State private var selectedProject: Project?
     @State private var screenshots: [URL] = []
     @State private var isLoading = false
     @State private var selectedScreenshots: Set<URL> = []
     @State private var showingPreview = false
     @State private var previewImage: URL?
+    @State private var showingVideoCreation = false
     @State private var sortOrder: SortOrder = .newest
     @State private var thumbnailSize: CGFloat = 150
     
@@ -244,7 +306,7 @@ struct GalleryView: View {
             Divider()
             
             // Main gallery content
-            if let currentProject = selectedProject ?? projectManager.currentProject {
+            if (selectedProject ?? projectManager.currentProject) != nil {
                 if screenshots.isEmpty && !isLoading {
                     emptyGalleryView
                 } else {
@@ -264,6 +326,11 @@ struct GalleryView: View {
         .sheet(isPresented: $showingPreview) {
             if let previewImage = previewImage {
                 ImagePreviewSheet(imageURL: previewImage)
+            }
+        }
+        .sheet(isPresented: $showingVideoCreation) {
+            VideoCreationSheet(selectedImages: Array(selectedScreenshots)) {
+                selectedScreenshots.removeAll()
             }
         }
         .focusable()
@@ -311,18 +378,24 @@ struct GalleryView: View {
                     Image(systemName: "rectangle.grid.3x2")
                         .foregroundColor(.secondary)
                     
-                    Slider(value: $thumbnailSize, in: 100...300, step: 25)
-                        .frame(width: 100)
+                    Slider(value: $thumbnailSize, in: 100...500, step: 25)
+                        .frame(width: 120)
                     
                     Image(systemName: "rectangle.grid.1x2")
                         .foregroundColor(.secondary)
+                        
+                    // Show current zoom level
+                    Text("\(Int(thumbnailSize))px")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(width: 40)
                 }
                 
                 // Selection actions
                 if !selectedScreenshots.isEmpty {
                     Menu("\(selectedScreenshots.count) selected") {
                         Button("Create Video") {
-                            // TODO: Implement video creation
+                            showingVideoCreation = true
                         }
                         
                         Button("Export Selected") {
@@ -351,36 +424,60 @@ struct GalleryView: View {
     
     // MARK: - Gallery Grid View
     private var galleryGridView: some View {
-        ScrollView {
-            LazyVGrid(columns: [
-                GridItem(.adaptive(minimum: thumbnailSize, maximum: thumbnailSize + 50), spacing: 16)
-            ], spacing: 16) {
-                ForEach(screenshots, id: \.self) { screenshotURL in
-                    ThumbnailView(
-                        imageURL: screenshotURL,
-                        thumbnailSize: thumbnailSize,
-                        isSelected: selectedScreenshots.contains(screenshotURL),
-                        onTap: {
-                            if selectedScreenshots.isEmpty {
-                                // Single tap for preview
-                                previewImage = screenshotURL
-                                showingPreview = true
-                            } else {
-                                // Multi-selection mode
+        GeometryReader { geometry in
+            let baseCanvasHeight: CGFloat = geometry.size.height * 0.5 // Half screen minimum
+            let zoomFactor = thumbnailSize / 150.0 // 150 is the base size
+            let canvasHeight = max(baseCanvasHeight, baseCanvasHeight * zoomFactor)
+            let canvasWidth = geometry.size.width * min(1.0, 0.6 + (zoomFactor * 0.4)) // Expand width too
+            
+            ScrollView([.horizontal, .vertical]) {
+                let gridSpacing = max(16, thumbnailSize * 0.1) // Dynamic spacing based on thumbnail size
+                LazyVGrid(columns: [
+                    GridItem(.adaptive(minimum: thumbnailSize, maximum: thumbnailSize + 50), spacing: gridSpacing)
+                ], spacing: gridSpacing) {
+                    ForEach(screenshots, id: \.self) { screenshotURL in
+                        ThumbnailView(
+                            imageURL: screenshotURL,
+                            thumbnailSize: thumbnailSize,
+                            isSelected: selectedScreenshots.contains(screenshotURL),
+                            onTap: {
+                                if selectedScreenshots.isEmpty {
+                                    // Single tap for preview
+                                    previewImage = screenshotURL
+                                    showingPreview = true
+                                } else {
+                                    // Multi-selection mode
+                                    toggleSelection(screenshotURL)
+                                }
+                            },
+                            onLongPress: {
                                 toggleSelection(screenshotURL)
                             }
-                        },
-                        onLongPress: {
-                            toggleSelection(screenshotURL)
-                        }
-                    )
-                    .scaleEffect(selectedScreenshots.contains(screenshotURL) ? 0.95 : 1.0)
-                    .animation(.easeInOut(duration: 0.2), value: selectedScreenshots.contains(screenshotURL))
-                    .id(screenshotURL) // Ensure proper identity for animations
+                        )
+                        .scaleEffect(selectedScreenshots.contains(screenshotURL) ? 0.95 : 1.0)
+                        .animation(.easeInOut(duration: 0.2), value: selectedScreenshots.contains(screenshotURL))
+                        .id(screenshotURL) // Ensure proper identity for animations
+                    }
                 }
+                .padding()
+                .frame(
+                    minWidth: canvasWidth,
+                    minHeight: canvasHeight,
+                    alignment: .topLeading
+                )
+                .animation(.easeInOut(duration: 0.3), value: thumbnailSize) // Smooth size transitions
             }
-            .padding()
-            .animation(.easeInOut(duration: 0.3), value: thumbnailSize) // Smooth size transitions
+            .frame(
+                width: canvasWidth,
+                height: canvasHeight
+            )
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(12)
+            .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+            .position(
+                x: geometry.size.width * 0.5,
+                y: geometry.size.height * 0.5
+            )
         }
         .overlay(alignment: .bottomTrailing) {
             if isLoading {
@@ -541,7 +638,7 @@ struct GalleryView: View {
     private func exportScreenshots(to destinationURL: URL) async {
         let fileManager = FileManager.default
         
-        for (index, screenshotURL) in selectedScreenshots.enumerated() {
+        for (_, screenshotURL) in selectedScreenshots.enumerated() {
             do {
                 let fileName = screenshotURL.lastPathComponent
                 let destinationFileURL = destinationURL.appendingPathComponent(fileName)
@@ -807,17 +904,25 @@ struct ImagePreviewSheet: View {
     @State private var scale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
+    @State private var zoomLevel: Int = 0 // 0 = fit, 1 = 100%, 2 = 200%, 3 = 400%, 4 = 800%, 5 = 1600%, 6 = 3200%
+    
+    private let zoomLevels: [CGFloat] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                
-                if let fullImage = fullImage {
+        ZStack {
+            Color.black.ignoresSafeArea(.all)
+            
+            if let fullImage = fullImage {
+                // ScrollView to allow the image to break outside bounds
+                ScrollView([.horizontal, .vertical]) {
                     Image(nsImage: fullImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .scaleEffect(scale)
+                        .frame(
+                            width: fullImage.size.width * scale,
+                            height: fullImage.size.height * scale
+                        )
+                        .scaleEffect(1.0) // Remove scaleEffect since we're using frame sizing
                         .offset(offset)
                         .gesture(
                             DragGesture()
@@ -831,55 +936,167 @@ struct ImagePreviewSheet: View {
                                     lastOffset = offset
                                 }
                         )
+                        .gesture(
+                            MagnificationGesture()
+                                .onChanged { value in
+                                    let newScale = scale * value
+                                    scale = min(max(newScale, 0.1), 64.0) // Match our maximum zoom level
+                                }
+                                .onEnded { value in
+                                    // Snap to nearest zoom level
+                                    let targetScale = scale
+                                    if let nearestLevel = zoomLevels.min(by: { abs($0 - targetScale) < abs($1 - targetScale) }) {
+                                        withAnimation(.spring()) {
+                                            scale = nearestLevel
+                                            if let index = zoomLevels.firstIndex(of: nearestLevel) {
+                                                zoomLevel = index
+                                            }
+                                        }
+                                    }
+                                }
+                        )
                         .onTapGesture(count: 2) {
                             withAnimation(.spring()) {
-                                if scale > 1 {
-                                    scale = 1
+                                zoomLevel = (zoomLevel + 1) % zoomLevels.count
+                                scale = zoomLevels[zoomLevel]
+                                
+                                // Reset position when going back to fit
+                                if zoomLevel == 0 {
                                     offset = .zero
                                     lastOffset = .zero
-                                } else {
-                                    scale = 2
                                 }
                             }
                         }
-                } else if isLoading {
-                    ProgressView("Loading...")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+
+            } else if isLoading {
+                ProgressView("Loading...")
+                    .foregroundColor(.white)
+            } else {
+                VStack {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle)
                         .foregroundColor(.white)
-                } else {
-                    VStack {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.largeTitle)
-                            .foregroundColor(.white)
-                        Text("Failed to load image")
-                            .foregroundColor(.white)
-                    }
+                    Text("Failed to load image")
+                        .foregroundColor(.white)
                 }
             }
-            .navigationTitle(imageURL.lastPathComponent)
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Done") {
-                        dismiss()
+            
+            // Close button in top-right corner
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark")
+                            .foregroundColor(.white)
+                            .font(.title2)
+                            .padding(8)
+                            .background(.black.opacity(0.7), in: Circle())
                     }
+                    .buttonStyle(.plain)
+                    .padding(.top, 20)
+                    .padding(.trailing, 20)
                 }
-                
-                ToolbarItem(placement: .secondaryAction) {
-                    Menu("Actions") {
-                        Button("Show in Finder") {
-                            NSWorkspace.shared.selectFile(imageURL.path, inFileViewerRootedAtPath: "")
-                        }
+                Spacer()
+            }
+            
+            // Zoom indicator and controls in bottom-right
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Text("\(Int(scale * 100))%")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
                         
-                        Button("Export...") {
-                            exportImage()
+                        // Zoom controls
+                        VStack(spacing: 4) {
+                            Button(action: zoomIn) {
+                                Image(systemName: "plus.magnifyingglass")
+                                    .foregroundColor(.white)
+                                    .font(.title2)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            Button(action: zoomOut) {
+                                Image(systemName: "minus.magnifyingglass")
+                                    .foregroundColor(.white)
+                                    .font(.title2)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            Button(action: resetZoom) {
+                                Image(systemName: "arrow.up.left.and.down.right.magnifyingglass")
+                                    .foregroundColor(.white)
+                                    .font(.title2)
+                            }
+                            .buttonStyle(.plain)
                         }
+                        .padding(8)
+                        .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .padding()
+                }
+            }
+            
+            // Image title and actions in top-left
+            VStack {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(imageURL.lastPathComponent)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
                         
-                        Button("Delete...") {
-                            deleteImage()
+                        HStack(spacing: 8) {
+                            Button("Show in Finder") {
+                                NSWorkspace.shared.selectFile(imageURL.path, inFileViewerRootedAtPath: "")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.white)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 4))
+                            
+                            Button("Export") {
+                                exportImage()
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.white)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 4))
+                            
+                            Button("Delete") {
+                                deleteImage()
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.red)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 4))
                         }
                     }
+                    .padding(.top, 20)
+                    .padding(.leading, 20)
+                    Spacer()
                 }
+                Spacer()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
         .onAppear {
             loadFullImage()
         }
@@ -900,6 +1117,39 @@ struct ImagePreviewSheet: View {
                     isLoading = false
                 }
             }
+        }
+    }
+    
+    private func zoomIn() {
+        withAnimation(.spring()) {
+            if zoomLevel < zoomLevels.count - 1 {
+                zoomLevel += 1
+                scale = zoomLevels[zoomLevel]
+            }
+        }
+    }
+    
+    private func zoomOut() {
+        withAnimation(.spring()) {
+            if zoomLevel > 0 {
+                zoomLevel -= 1
+                scale = zoomLevels[zoomLevel]
+                
+                // Reset position when going back to fit
+                if zoomLevel == 0 {
+                    offset = .zero
+                    lastOffset = .zero
+                }
+            }
+        }
+    }
+    
+    private func resetZoom() {
+        withAnimation(.spring()) {
+            zoomLevel = 0
+            scale = zoomLevels[0]
+            offset = .zero
+            lastOffset = .zero
         }
     }
     
@@ -931,9 +1181,273 @@ struct ImagePreviewSheet: View {
     }
 }
 
+// MARK: - Video Creation Sheet
+struct VideoCreationSheet: View {
+    let selectedImages: [URL]
+    let onCompletion: () -> Void
+    
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var videoGenerator: VideoGenerator
+    @State private var videoSettings = VideoSettings.default
+    @State private var selectedResolution = "1080p"
+    @State private var outputURL: URL?
+    @State private var showingSavePanel = false
+    @State private var isGenerating = false
+    @State private var generatedVideoURL: URL?
+    @State private var errorMessage: String?
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                // Header
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Create Timelapse Video")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    
+                    Text("\(selectedImages.count) images selected")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Divider()
+                
+                // Video Settings
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Video Settings")
+                        .font(.headline)
+                    
+                    LazyVGrid(columns: [
+                        GridItem(.flexible()),
+                        GridItem(.flexible())
+                    ], spacing: 16) {
+                        // Frame Rate
+                        VStack(alignment: .leading) {
+                            Text("Frame Rate")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            
+                            Picker("FPS", selection: Binding(
+                                get: { videoSettings.fps },
+                                set: { videoSettings = VideoSettings(fps: $0, resolution: videoSettings.resolution, quality: videoSettings.quality, format: videoSettings.format, duration: videoSettings.duration) }
+                            )) {
+                                Text("24 fps").tag(24.0)
+                                Text("30 fps").tag(30.0)
+                                Text("60 fps").tag(60.0)
+                            }
+                            .pickerStyle(.menu)
+                        }
+                        
+                        // Quality
+                        VStack(alignment: .leading) {
+                            Text("Quality")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            
+                            Picker("Quality", selection: Binding(
+                                get: { videoSettings.quality },
+                                set: { videoSettings = VideoSettings(fps: videoSettings.fps, resolution: videoSettings.resolution, quality: $0, format: videoSettings.format, duration: videoSettings.duration) }
+                            )) {
+                                ForEach(VideoSettings.VideoQuality.allCases, id: \.self) { quality in
+                                    Text(quality.rawValue).tag(quality)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                        
+                        // Resolution
+                        VStack(alignment: .leading) {
+                            Text("Resolution")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            
+                            Picker("Resolution", selection: $selectedResolution) {
+                                Text("1080p").tag("1080p")
+                                Text("1440p").tag("1440p")
+                                Text("4K").tag("4K")
+                            }
+                            .pickerStyle(.menu)
+                            .onChange(of: selectedResolution) { resolution in
+                                let size: CGSize
+                                switch resolution {
+                                case "1440p":
+                                    size = CGSize(width: 2560, height: 1440)
+                                case "4K":
+                                    size = CGSize(width: 3840, height: 2160)
+                                default: // 1080p
+                                    size = CGSize(width: 1920, height: 1080)
+                                }
+                                videoSettings = VideoSettings(fps: videoSettings.fps, resolution: size, quality: videoSettings.quality, format: videoSettings.format, duration: videoSettings.duration)
+                            }
+                        }
+                        
+                        // Format
+                        VStack(alignment: .leading) {
+                            Text("Format")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            
+                            Picker("Format", selection: Binding(
+                                get: { videoSettings.format },
+                                set: { videoSettings = VideoSettings(fps: videoSettings.fps, resolution: videoSettings.resolution, quality: videoSettings.quality, format: $0, duration: videoSettings.duration) }
+                            )) {
+                                ForEach(VideoSettings.VideoFormat.allCases, id: \.self) { format in
+                                    Text(format.rawValue).tag(format)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                    }
+                }
+                .padding()
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(8)
+                
+                // Progress
+                if let progress = videoGenerator.progress {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Generating Video...")
+                                .font(.headline)
+                            Spacer()
+                            Text("\(Int(progress.percentage))%")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        ProgressView(value: progress.percentage / 100)
+                        
+                        HStack {
+                            Text("Frame \(progress.currentFrame) of \(progress.totalFrames)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            Spacer()
+                            
+                            if let remaining = progress.estimatedTimeRemaining {
+                                Text("~\(Int(remaining))s remaining")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(8)
+                }
+                
+                // Error message
+                if let errorMessage = errorMessage {
+                    Text(errorMessage)
+                        .foregroundColor(.red)
+                        .padding()
+                        .background(Color.red.opacity(0.1))
+                        .cornerRadius(8)
+                }
+                
+                // Success message
+                if let generatedVideoURL = generatedVideoURL {
+                    VStack(spacing: 12) {
+                        Text("✅ Video created successfully!")
+                            .font(.headline)
+                            .foregroundColor(.green)
+                        
+                        HStack(spacing: 12) {
+                            Button("Show in Finder") {
+                                NSWorkspace.shared.selectFile(generatedVideoURL.path, inFileViewerRootedAtPath: "")
+                            }
+                            .buttonStyle(.bordered)
+                            
+                            Button("Play Video") {
+                                NSWorkspace.shared.open(generatedVideoURL)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    .padding()
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Create Video")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        if videoGenerator.isGenerating {
+                            videoGenerator.cancelGeneration()
+                        }
+                        dismiss()
+                    }
+                }
+                
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Create Video") {
+                        createVideo()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(videoGenerator.isGenerating || generatedVideoURL != nil)
+                }
+            }
+        }
+        .frame(width: 600, height: 500)
+        .onDisappear {
+            onCompletion()
+        }
+    }
+    
+    private func createVideo() {
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.mpeg4Movie]
+        savePanel.nameFieldStringValue = "Timelapse_\(DateFormatter.fileNameFormatter.string(from: Date())).mp4"
+        
+        savePanel.begin { response in
+            if response == .OK, let url = savePanel.url {
+                outputURL = url
+                generateVideo(outputURL: url)
+            }
+        }
+    }
+    
+    private func generateVideo(outputURL: URL) {
+        errorMessage = nil
+        generatedVideoURL = nil
+        
+        Task {
+            do {
+                let resultURL = try await videoGenerator.generateVideo(
+                    from: selectedImages,
+                    settings: videoSettings,
+                    outputURL: outputURL
+                )
+                
+                await MainActor.run {
+                    generatedVideoURL = resultURL
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+}
+
+extension DateFormatter {
+    static let fileNameFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        return formatter
+    }()
+}
+
 #Preview {
     ContentView()
         .environmentObject(ScreenshotManager())
         .environmentObject(ProjectManager())
         .environmentObject(ThumbnailGenerator())
+        .environmentObject(VideoGenerator())
 } 

@@ -17,10 +17,11 @@ struct TimelapseCreatorApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(screenshotManager)
-                .environmentObject(projectManager)
-                .environmentObject(thumbnailGenerator)
+                    ContentView()
+            .environmentObject(screenshotManager)
+            .environmentObject(projectManager)
+            .environmentObject(thumbnailGenerator)
+            .environmentObject(VideoGenerator())
                 .frame(minWidth: 1000, minHeight: 700)
                 .onAppear {
                     // Connect thumbnail generator to screenshot manager
@@ -48,9 +49,9 @@ struct SettingsView: View {
     @EnvironmentObject var thumbnailGenerator: ThumbnailGenerator
     @AppStorage("captureInterval") private var captureInterval: Double = 5.0
     @AppStorage("captureAreaMode") private var captureAreaMode: Int = 0
-    @AppStorage("imageFormat") private var imageFormat: Int = 0
-    @AppStorage("imageQuality") private var imageQuality: Double = 0.8
-    @AppStorage("thumbnailSize") private var thumbnailSize: Double = 200
+    @AppStorage("imageFormat") private var imageFormat: Int = 1 // Default to JPEG for smaller files
+    @AppStorage("imageQuality") private var imageQuality: Double = 0.7 // Reduced for smaller file sizes
+    @AppStorage("thumbnailSize") private var thumbnailSize: Double = 150 // Reduced for faster generation
     @AppStorage("thumbnailQuality") private var thumbnailQuality: Double = 0.8
     @AppStorage("enableThumbnailCache") private var enableThumbnailCache: Bool = true
     @AppStorage("maxCacheSize") private var maxCacheSize: Int = 100
@@ -69,11 +70,84 @@ struct SettingsView: View {
                     Picker("Capture Area", selection: $captureAreaMode) {
                         Text("Full Screen").tag(0)
                         Text("Main Display").tag(1)
-                        Text("Custom Area").tag(2)
+                        Text("Specific Window").tag(2)
+                        Text("Custom Region").tag(3)
                     }
                     .pickerStyle(.menu)
                     .onChange(of: captureAreaMode) { newValue in
                         screenshotManager.setCaptureAreaMode(newValue)
+                    }
+                    
+                    // Window selection for specific window mode
+                    if captureAreaMode == 2 {
+                        VStack(alignment: .leading) {
+                            Text("Select Window:")
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 4) {
+                                    ForEach(screenshotManager.availableWindows, id: \.id) { window in
+                                        Button(action: {
+                                            screenshotManager.setSelectedWindow(window.id)
+                                        }) {
+                                            HStack {
+                                                VStack(alignment: .leading) {
+                                                    Text(window.name)
+                                                        .lineLimit(1)
+                                                    Text(window.ownerName)
+                                                        .font(.caption)
+                                                        .foregroundColor(.secondary)
+                                                }
+                                                Spacer()
+                                                if screenshotManager.selectedWindowID == window.id {
+                                                    Image(systemName: "checkmark.circle.fill")
+                                                        .foregroundColor(.blue)
+                                                }
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+                                        .padding(.vertical, 2)
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 120)
+                            .border(Color.gray.opacity(0.3), width: 1)
+                            .cornerRadius(4)
+                            
+                            Button("Refresh Windows") {
+                                Task {
+                                    await screenshotManager.detectWindows()
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    
+                    // Region selection for custom region mode
+                    if captureAreaMode == 3 {
+                        VStack(alignment: .leading) {
+                            Text("Custom Region:")
+                            if screenshotManager.customRegion.isEmpty {
+                                Button("Select Region") {
+                                    screenshotManager.isSelectingRegion = true
+                                    // TODO: Implement region selection overlay
+                                }
+                                .buttonStyle(.bordered)
+                            } else {
+                                VStack(alignment: .leading) {
+                                    Text("Selected: \(Int(screenshotManager.customRegion.width))×\(Int(screenshotManager.customRegion.height))")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    HStack {
+                                        Button("Change Region") {
+                                            screenshotManager.isSelectingRegion = true
+                                        }
+                                        Button("Clear") {
+                                            screenshotManager.setCustomRegion(.zero)
+                                        }
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
                     }
                 }
                 
@@ -192,6 +266,13 @@ struct SettingsView: View {
                 Button("Check Screen Recording Permission") {
                     screenshotManager.checkPermissions()
                 }
+                
+                Button("Reset & Request Permissions") {
+                    Task {
+                        await screenshotManager.resetPermissions()
+                    }
+                }
+                .foregroundColor(.orange)
                 
                 if !screenshotManager.hasPermission {
                     Button("Open System Preferences") {

@@ -80,7 +80,7 @@ struct Project: Identifiable, Equatable {
     var screenshotCount: Int {
         do {
             let contents = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
-            return contents.filter { $0.pathExtension == "png" }.count
+            return contents.filter { $0.pathExtension == "png" || $0.pathExtension == "jpg" }.count
         } catch {
             return 0
         }
