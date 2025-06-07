@@ -12,6 +12,7 @@ struct ContentView: View {
     @EnvironmentObject var screenshotManager: ScreenshotManager
     @EnvironmentObject var projectManager: ProjectManager
     @State private var selectedTab = 0
+    @State private var selectedProjectForGallery: Project?
     
     // Method to start capture with auto-project creation
     private func startCaptureWithAutoProject() {
@@ -63,9 +64,12 @@ struct ContentView: View {
                         GalleryView(startCaptureAction: {
                             selectedTab = 0
                             startCaptureWithAutoProject()
-                        })
+                        }, projectToDisplay: selectedProjectForGallery)
                     case 2:
-                        ProjectsView()
+                        ProjectsView(onSelectProject: { project in
+                            selectedProjectForGallery = project
+                            selectedTab = 1 // Switch to gallery tab
+                        })
                     case 3:
                         VideoGenerationView()
                     case 4:
@@ -141,9 +145,12 @@ struct ContentView: View {
                         GalleryView(startCaptureAction: {
                             selectedTab = 0
                             startCaptureWithAutoProject()
-                        })
+                        }, projectToDisplay: selectedProjectForGallery)
                     case 2:
-                        ProjectsView()
+                        ProjectsView(onSelectProject: { project in
+                            selectedProjectForGallery = project
+                            selectedTab = 1 // Switch to gallery tab
+                        })
                     case 3:
                         VideoGenerationView()
                     case 4:
@@ -351,12 +358,21 @@ struct GalleryView: View {
     @State private var selectedScreenshots: Set<URL> = []
     @State private var showingPreview = false
     @State private var previewImage: URL?
+    @State private var galleryRefreshTimer: Timer?
     @State private var showingVideoCreation = false
-    @State private var sortOrder: SortOrder = .newest
+    @State private var sortOrder: SortOrder = .oldest
     @State private var thumbnailSize: CGFloat = 150
     
     // Action to start capture (passed from ContentView)
     let startCaptureAction: () -> Void
+    
+    // Optional project to display (overrides current project)
+    let projectToDisplay: Project?
+    
+    init(startCaptureAction: @escaping () -> Void, projectToDisplay: Project? = nil) {
+        self.startCaptureAction = startCaptureAction
+        self.projectToDisplay = projectToDisplay
+    }
     
     private let columns = [
         GridItem(.adaptive(minimum: 120, maximum: 200), spacing: 16)
@@ -376,7 +392,7 @@ struct GalleryView: View {
             Divider()
             
             // Main gallery content
-            if (selectedProject ?? projectManager.currentProject) != nil {
+            if (projectToDisplay ?? selectedProject ?? projectManager.currentProject) != nil {
                 if screenshots.isEmpty && !isLoading {
                     emptyGalleryView
                 } else {
@@ -389,13 +405,18 @@ struct GalleryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             loadCurrentProject()
+            startGalleryRefreshTimer()
+        }
+        .onDisappear {
+            stopGalleryRefreshTimer()
         }
         .onChange(of: projectManager.currentProject) { _ in
             loadCurrentProject()
         }
-        .sheet(isPresented: $showingPreview) {
-            if let previewImage = previewImage {
-                ImagePreviewSheet(imageURL: previewImage)
+        .onChange(of: showingPreview) { isShowing in
+            if isShowing, let previewImage = previewImage {
+                openImagePreviewWindow(imageURL: previewImage)
+                showingPreview = false // Reset the state
             }
         }
         .sheet(isPresented: $showingVideoCreation) {
@@ -417,7 +438,7 @@ struct GalleryView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 
-                if let project = selectedProject ?? projectManager.currentProject {
+                if let project = projectToDisplay ?? selectedProject ?? projectManager.currentProject {
                     Text("\(project.name) • \(screenshots.count) screenshots")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
@@ -599,7 +620,7 @@ struct GalleryView: View {
     
     // MARK: - Helper Methods
     private func loadCurrentProject() {
-        guard let project = selectedProject ?? projectManager.currentProject else {
+        guard let project = projectToDisplay ?? selectedProject ?? projectManager.currentProject else {
             screenshots = []
             return
         }
@@ -664,6 +685,41 @@ struct GalleryView: View {
     private func refreshGallery() {
         selectedScreenshots.removeAll()
         loadCurrentProject()
+    }
+    
+    private func startGalleryRefreshTimer() {
+        stopGalleryRefreshTimer()
+        galleryRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            // Only refresh if we have a current project (since this timer is only active when gallery view is shown)
+            if projectManager.currentProject != nil {
+                refreshGallery()
+            }
+        }
+    }
+    
+    private func stopGalleryRefreshTimer() {
+        galleryRefreshTimer?.invalidate()
+        galleryRefreshTimer = nil
+    }
+    
+    private func openImagePreviewWindow(imageURL: URL) {
+        // Create a new window for image preview
+        let previewWindow = NSWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 800, height: 600),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        
+        previewWindow.title = imageURL.lastPathComponent
+        previewWindow.isReleasedWhenClosed = true
+        previewWindow.center()
+        
+        // Create the content view for the window
+        let contentView = ImagePreviewWindowContent(imageURL: imageURL, window: previewWindow)
+        previewWindow.contentView = NSHostingView(rootView: contentView)
+        
+        previewWindow.makeKeyAndOrderFront(nil)
     }
     
     private func exportSelectedScreenshots() {
@@ -750,6 +806,13 @@ struct ProjectsView: View {
     @State private var showingPurgeAlert = false
     @State private var totalStorageUsed: Int64 = 0
     @State private var isCalculatingStorage = false
+    
+    // Callback to switch to gallery with selected project
+    let onSelectProject: ((Project) -> Void)?
+    
+    init(onSelectProject: ((Project) -> Void)? = nil) {
+        self.onSelectProject = onSelectProject
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -912,6 +975,9 @@ struct ProjectsView: View {
                             projectManager.deleteProject(project)
                             selectedProjects.remove(project.id)
                             calculateTotalStorage()
+                        },
+                        onSelectProject: {
+                            onSelectProject?(project)
                         }
                     )
                 }
@@ -1003,6 +1069,7 @@ struct ProjectRowView: View {
     let isSelected: Bool
     let onToggleSelection: () -> Void
     let onDelete: () -> Void
+    let onSelectProject: () -> Void
     
     @State private var projectSize: Int64 = 0
     @State private var isCalculatingSize = false
@@ -1090,6 +1157,9 @@ struct ProjectRowView: View {
         .padding()
         .background(isSelected ? Color.accentColor.opacity(0.1) : Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
+        .onTapGesture {
+            onSelectProject()
+        }
         .onAppear {
             calculateProjectSize()
         }
@@ -1337,7 +1407,227 @@ struct ThumbnailView: View {
     }
 }
 
-// MARK: - Image Preview Sheet
+// MARK: - Image Preview Window Content
+struct ImagePreviewWindowContent: View {
+    let imageURL: URL
+    let window: NSWindow
+    @State private var fullImage: NSImage?
+    @State private var isLoading = true
+    @State private var scale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+    @State private var zoomLevel: Int = 0 // 0 = fit, 1 = 100%, 2 = 200%, etc.
+    
+    private let zoomLevels: [CGFloat] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
+    
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea(.all)
+            
+            if let fullImage = fullImage {
+                Image(nsImage: fullImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                offset = CGSize(
+                                    width: lastOffset.width + value.translation.width,
+                                    height: lastOffset.height + value.translation.height
+                                )
+                            }
+                            .onEnded { value in
+                                lastOffset = offset
+                            }
+                    )
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                let newScale = scale * value
+                                scale = min(max(newScale, 0.1), 64.0)
+                            }
+                            .onEnded { value in
+                                // Snap to nearest zoom level
+                                let targetScale = scale
+                                if let nearestLevel = zoomLevels.min(by: { abs($0 - targetScale) < abs($1 - targetScale) }) {
+                                    withAnimation(.spring()) {
+                                        scale = nearestLevel
+                                        if let index = zoomLevels.firstIndex(of: nearestLevel) {
+                                            zoomLevel = index
+                                        }
+                                    }
+                                }
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring()) {
+                            zoomLevel = (zoomLevel + 1) % zoomLevels.count
+                            scale = zoomLevels[zoomLevel]
+                            
+                            // Reset position when going back to fit
+                            if zoomLevel == 0 {
+                                offset = .zero
+                                lastOffset = .zero
+                            }
+                        }
+                    }
+            } else if isLoading {
+                ProgressView("Loading...")
+                    .foregroundColor(.white)
+            } else {
+                VStack {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle)
+                        .foregroundColor(.white)
+                    Text("Failed to load image")
+                        .foregroundColor(.white)
+                }
+            }
+            
+            // Zoom indicator in bottom-right
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Text("\(Int(scale * 100))%")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .padding()
+                }
+            }
+            
+            // Image actions in top-left
+            VStack {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Button("Show in Finder") {
+                                NSWorkspace.shared.selectFile(imageURL.path, inFileViewerRootedAtPath: "")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.white)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 4))
+                            
+                            Button("Delete") {
+                                deleteImage()
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.red)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 4))
+                        }
+                    }
+                    .padding(.top, 20)
+                    .padding(.leading, 20)
+                    Spacer()
+                }
+                Spacer()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
+        .onAppear {
+            loadFullImage()
+        }
+        .focusable()
+        .onExitCommand {
+            window.close()
+        }
+    }
+    
+    private func loadFullImage() {
+        Task {
+            do {
+                guard let nsImage = NSImage(contentsOf: imageURL) else {
+                    await MainActor.run {
+                        isLoading = false
+                    }
+                    return
+                }
+                
+                await MainActor.run {
+                    fullImage = nsImage
+                    isLoading = false
+                }
+            }
+        }
+    }
+    
+    private func zoomIn() {
+        withAnimation(.spring()) {
+            if zoomLevel < zoomLevels.count - 1 {
+                zoomLevel += 1
+                scale = zoomLevels[zoomLevel]
+            }
+        }
+    }
+    
+    private func zoomOut() {
+        withAnimation(.spring()) {
+            if zoomLevel > 0 {
+                zoomLevel -= 1
+                scale = zoomLevels[zoomLevel]
+                
+                // Reset position when going back to fit
+                if zoomLevel == 0 {
+                    offset = .zero
+                    lastOffset = .zero
+                }
+            }
+        }
+    }
+    
+    private func resetZoom() {
+        withAnimation(.spring()) {
+            zoomLevel = 0
+            scale = zoomLevels[0]
+            offset = .zero
+            lastOffset = .zero
+        }
+    }
+    
+    private func exportImage() {
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.png, .jpeg]
+        savePanel.nameFieldStringValue = imageURL.lastPathComponent
+        
+        savePanel.begin { response in
+            if response == .OK, let url = savePanel.url {
+                try? FileManager.default.copyItem(at: imageURL, to: url)
+            }
+        }
+    }
+    
+    private func deleteImage() {
+        let alert = NSAlert()
+        alert.messageText = "Delete Screenshot"
+        alert.informativeText = "Are you sure you want to delete \(imageURL.lastPathComponent)? This action cannot be undone."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            try? FileManager.default.removeItem(at: imageURL)
+            window.close()
+        }
+    }
+}
+
+// MARK: - Image Preview Sheet (Legacy)
 struct ImagePreviewSheet: View {
     let imageURL: URL
     @Environment(\.dismiss) var dismiss
@@ -1541,6 +1831,13 @@ struct ImagePreviewSheet: View {
         .background(Color.black)
         .onAppear {
             loadFullImage()
+        }
+        .focusable()
+        .onMoveCommand { direction in
+            // Handle arrow keys if needed
+        }
+        .onExitCommand {
+            dismiss()
         }
     }
     
