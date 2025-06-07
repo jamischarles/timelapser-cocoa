@@ -95,12 +95,22 @@ class ScreenshotManager: ObservableObject {
         if preflightResult {
             hasPermission = true
             print("✅ Screen recording permission detected as granted via preflight")
+            print("📋 Full screen capture will include all windows and desktop")
         } else {
             // For development, try checking if we can actually capture
             // This uses a different approach that's less likely to trigger dialogs
             let testResult = canCaptureWithoutDialog()
             hasPermission = testResult
-            print(testResult ? "✅ Screen recording permission detected via test capture" : "⚠️ Screen recording permission not detected")
+            
+            if testResult {
+                print("✅ Screen recording permission detected via test capture")
+            } else {
+                print("⚠️ Screen recording permission not detected")
+                print("📋 To capture entire screen with all windows:")
+                print("📋 Go to System Preferences > Security & Privacy > Privacy > Screen Recording")
+                print("📋 Add and enable TimelapseCreator")
+                print("📋 Without this, only app windows may be captured")
+            }
         }
     }
     
@@ -248,27 +258,6 @@ class ScreenshotManager: ObservableObject {
         }
     }
     
-    private func getCombinedDisplayBounds() -> CGRect {
-        var combinedBounds = CGRect.null
-        
-        for displayID in availableDisplays {
-            let displayBounds = CGDisplayBounds(displayID)
-            if combinedBounds.isNull {
-                combinedBounds = displayBounds
-            } else {
-                combinedBounds = combinedBounds.union(displayBounds)
-            }
-        }
-        
-        // If no displays detected, fallback to main display bounds
-        if combinedBounds.isNull {
-            combinedBounds = CGDisplayBounds(CGMainDisplayID())
-        }
-        
-        print("📏 Combined display bounds: \(combinedBounds)")
-        return combinedBounds
-    }
-    
     // MARK: - Capture Configuration
     func setDisplayID(_ displayID: CGDirectDisplayID) {
         selectedDisplayID = Int(displayID)
@@ -380,18 +369,14 @@ class ScreenshotManager: ObservableObject {
             
             print("📸 Screenshot captured successfully")
             
-            // Ensure we have a project directory
-            if projectManager?.currentProject == nil {
-                print("📁 No current project, creating new one...")
-                await createCaptureProject()
-            }
+            // Ensure we have a project directory and wait for it to be created
+            let projectURL = await ensureProjectExists()
             
-            // Save to disk on file queue
-            if let projectURL = projectManager?.currentProject?.url {
+            if let projectURL = projectURL {
                 print("💾 Saving screenshot to: \(projectURL.path)")
                 await saveScreenshot(screenshot, to: projectURL)
             } else {
-                print("❌ No project URL available for saving")
+                print("❌ Failed to create or access project directory")
             }
             
             // Update performance metrics
@@ -414,33 +399,25 @@ class ScreenshotManager: ObservableObject {
         
         switch _captureAreaMode {
         case 0: // Full screen (all displays)
-            print("🎯 Full screen capture using Core Graphics")
-            // Try multiple approaches to capture all displays
+            print("🎯 Full screen capture using CGDisplayCreateImage")
             
-            // First attempt: Use CGRect.infinite to capture all displays
-            cgImage = CGWindowListCreateImage(
-                CGRect.infinite,
-                .optionOnScreenOnly,
-                kCGNullWindowID,
-                .bestResolution
-            )
-            
-            // Fallback: If infinite rect doesn't work, calculate combined display bounds
-            if cgImage == nil {
-                print("⚠️ Infinite rect capture failed, trying combined display bounds...")
-                let combinedBounds = getCombinedDisplayBounds()
-                cgImage = CGWindowListCreateImage(
-                    combinedBounds,
-                    .optionOnScreenOnly,
-                    kCGNullWindowID,
-                    .bestResolution
-                )
+            // Check screen recording permissions first
+            if !CGPreflightScreenCaptureAccess() {
+                print("⚠️ Screen recording permission required")
+                // Request permission (will show system dialog)
+                CGRequestScreenCaptureAccess()
+                return .failure(ScreenshotError.captureFailure)
             }
             
-            // Final fallback: Use main display capture
+            // Use CGDisplayCreateImage to capture the entire main display
+            let displayID = CGMainDisplayID()
+            cgImage = CGDisplayCreateImage(displayID)
+            
             if cgImage == nil {
-                print("⚠️ Combined bounds capture failed, falling back to main display...")
-                cgImage = CGDisplayCreateImage(CGMainDisplayID())
+                print("❌ CGDisplayCreateImage failed - check screen recording permissions")
+                return .failure(ScreenshotError.captureFailure)
+            } else {
+                print("✅ Successfully captured entire display including all windows")
             }
 
         case 1: // Main display only
@@ -592,10 +569,64 @@ class ScreenshotManager: ObservableObject {
     }
     
     // MARK: - Project Management
-    private func createCaptureProject() async {
-        print("📁 Delegating project creation to ProjectManager...")
+    private func ensureProjectExists() async -> URL? {
+        // If we already have a current project, return its URL
+        if let currentProject = await MainActor.run(body: { projectManager?.currentProject }) {
+            let projectURL = currentProject.url
+            print("📁 Using existing project: \(projectURL.lastPathComponent)")
+            return projectURL
+        }
+        
+        // No current project, create a new one
+        print("📁 No current project found, creating new one...")
+        
         await MainActor.run {
             projectManager?.createNewProject()
+        }
+        
+        // Give a brief moment for the creation to complete
+        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        
+        // Check if project was created successfully
+        if let newProject = await MainActor.run(body: { projectManager?.currentProject }) {
+            let projectURL = newProject.url
+            print("✅ Using project: \(projectURL.lastPathComponent)")
+            return projectURL
+        }
+        
+        // If ProjectManager failed, create a fallback project
+        print("⚠️ ProjectManager creation failed, creating fallback project...")
+        return await createFallbackProject()
+    }
+    
+    private func createFallbackProject() async -> URL? {
+        do {
+            // Create a fallback project directory directly
+            let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let projectsURL = documentsURL.appendingPathComponent("TimelapseCaptureProjects")
+            
+            // Ensure the projects directory exists
+            try FileManager.default.createDirectory(at: projectsURL, withIntermediateDirectories: true, attributes: nil)
+            
+            // Create a unique project folder with more precise timestamp
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd_HHmmss_SSS" // Add milliseconds for uniqueness
+            let timestamp = formatter.string(from: Date())
+            let fallbackProjectURL = projectsURL.appendingPathComponent("Fallback_\(timestamp)")
+            
+            try FileManager.default.createDirectory(at: fallbackProjectURL, withIntermediateDirectories: true, attributes: nil)
+            
+            // Try to update ProjectManager's knowledge of this project
+            await MainActor.run {
+                projectManager?.refreshProjects()
+            }
+            
+            print("✅ Created fallback project: \(fallbackProjectURL.lastPathComponent)")
+            return fallbackProjectURL
+            
+        } catch {
+            print("❌ Failed to create fallback project: \(error.localizedDescription)")
+            return nil
         }
     }
     

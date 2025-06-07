@@ -13,6 +13,13 @@ struct ContentView: View {
     @EnvironmentObject var projectManager: ProjectManager
     @State private var selectedTab = 0
     
+    // Method to start capture with auto-project creation
+    private func startCaptureWithAutoProject() {
+        Task {
+            await screenshotManager.startCapture()
+        }
+    }
+    
     var body: some View {
         NavigationSplitView {
             // Sidebar
@@ -51,7 +58,10 @@ struct ContentView: View {
                 case 0:
                     CaptureView()
                 case 1:
-                    GalleryView()
+                    GalleryView(startCaptureAction: {
+                        selectedTab = 0
+                        startCaptureWithAutoProject()
+                    })
                 case 2:
                     ProjectsView()
                 case 3:
@@ -77,13 +87,10 @@ struct ContentView: View {
                     .controlSize(.large)
                 } else {
                     Button("Start Capture") {
-                        Task {
-                            await screenshotManager.startCapture()
-                        }
+                        startCaptureWithAutoProject()
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(!screenshotManager.hasPermission)
                 }
                 
                 Button("New Project") {
@@ -103,6 +110,13 @@ struct ContentView: View {
 struct CaptureView: View {
     @EnvironmentObject var screenshotManager: ScreenshotManager
     @EnvironmentObject var projectManager: ProjectManager
+    
+    // Method to start capture with auto-project creation
+    private func startCaptureWithAutoProject() {
+        Task {
+            await screenshotManager.startCapture()
+        }
+    }
     
     private func getCurrentCaptureMode() -> String {
         switch screenshotManager.captureAreaMode {
@@ -258,13 +272,10 @@ struct CaptureView: View {
                             .foregroundColor(.secondary)
                         
                         Button("Start Capture") {
-                            Task {
-                                await screenshotManager.startCapture()
-                            }
+                            startCaptureWithAutoProject()
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .disabled(!screenshotManager.hasPermission)
                     }
                 }
             }
@@ -287,6 +298,9 @@ struct GalleryView: View {
     @State private var showingVideoCreation = false
     @State private var sortOrder: SortOrder = .newest
     @State private var thumbnailSize: CGFloat = 150
+    
+    // Action to start capture (passed from ContentView)
+    let startCaptureAction: () -> Void
     
     private let columns = [
         GridItem(.adaptive(minimum: 120, maximum: 200), spacing: 16)
@@ -520,8 +534,7 @@ struct GalleryView: View {
                 .multilineTextAlignment(.center)
             
             Button("Start Capture") {
-                // Switch to capture tab
-                // This would need to be passed up to ContentView
+                startCaptureAction()
             }
             .buttonStyle(.borderedProminent)
         }
@@ -844,7 +857,7 @@ struct ProjectsView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var projectsListView: some View {

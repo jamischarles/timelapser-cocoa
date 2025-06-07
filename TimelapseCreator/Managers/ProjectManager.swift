@@ -17,11 +17,12 @@ class ProjectManager: ObservableObject {
     
     // MARK: - Private Properties
     private let fileManager = FileManager.default
-    private let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+    private let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
     
     // MARK: - Initialization
     init() {
         loadProjects()
+        validateCurrentProject()
     }
     
     // MARK: - Project Management
@@ -31,22 +32,55 @@ class ProjectManager: ObservableObject {
         let timestamp = formatter.string(from: Date())
         
         let projectName = "Project_\(timestamp)"
-        let projectsURL = downloadsURL.appendingPathComponent("TimelapseCaptureProjects")
+        let projectsURL = documentsURL.appendingPathComponent("TimelapseCaptureProjects")
         let projectURL = projectsURL.appendingPathComponent(projectName)
         
+        print("📁 Creating project directory: \(projectURL.path)")
+        
         do {
-            try fileManager.createDirectory(at: projectURL, withIntermediateDirectories: true)
+            // Ensure the directory is created first
+            try fileManager.createDirectory(at: projectURL, withIntermediateDirectories: true, attributes: nil)
+            
+            // Verify the directory was actually created
+            guard fileManager.fileExists(atPath: projectURL.path) else {
+                print("❌ Directory creation failed - path doesn't exist after creation")
+                return
+            }
+            
+            // Only create the project object after successful directory creation
             let project = Project(name: projectName, url: projectURL, createdAt: Date())
             projects.append(project)
             currentProject = project
-            print("📁 Created project: \(projectName)")
+            
+            print("✅ Successfully created project: \(projectName) at \(projectURL.path)")
+            
         } catch {
-            print("❌ Failed to create project: \(error.localizedDescription)")
+            print("❌ Failed to create project directory: \(error.localizedDescription)")
         }
     }
     
     func refreshProjects() {
         loadProjects()
+        validateCurrentProject()
+    }
+    
+    private func validateCurrentProject() {
+        // Check if current project directory actually exists
+        if let current = currentProject {
+            if !fileManager.fileExists(atPath: current.url.path) {
+                print("⚠️ Current project directory doesn't exist: \(current.url.path)")
+                print("🔧 Clearing phantom project: \(current.name)")
+                currentProject = nil
+                
+                // Set current project to the most recent one that exists
+                if let mostRecent = projects.first {
+                    currentProject = mostRecent
+                    print("✅ Set current project to most recent: \(mostRecent.name)")
+                }
+            } else {
+                print("✅ Current project validated: \(current.name)")
+            }
+        }
     }
     
     func deleteProject(_ project: Project) {
@@ -97,7 +131,7 @@ class ProjectManager: ObservableObject {
     }
     
     func purgeAllProjects() {
-        let projectsURL = downloadsURL.appendingPathComponent("TimelapseCaptureProjects")
+        let projectsURL = documentsURL.appendingPathComponent("TimelapseCaptureProjects")
         
         do {
             try fileManager.removeItem(at: projectsURL)
@@ -110,7 +144,7 @@ class ProjectManager: ObservableObject {
     }
     
     private func loadProjects() {
-        let projectsURL = downloadsURL.appendingPathComponent("TimelapseCaptureProjects")
+        let projectsURL = documentsURL.appendingPathComponent("TimelapseCaptureProjects")
         
         guard fileManager.fileExists(atPath: projectsURL.path) else {
             projects = []
@@ -118,13 +152,13 @@ class ProjectManager: ObservableObject {
         }
         
         do {
-            let projectDirectories = try fileManager.contentsOfDirectory(at: projectsURL, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles)
+            let projectDirectories = try fileManager.contentsOfDirectory(at: projectsURL, includingPropertiesForKeys: [URLResourceKey.creationDateKey], options: .skipsHiddenFiles)
             
-            projects = projectDirectories.compactMap { url in
+            projects = projectDirectories.compactMap { url -> Project? in
                 guard url.hasDirectoryPath else { return nil }
                 
                 let name = url.lastPathComponent
-                let createdAt = (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? Date()
+                let createdAt = (try? url.resourceValues(forKeys: [URLResourceKey.creationDateKey]))?.creationDate ?? Date()
                 
                 return Project(name: name, url: url, createdAt: createdAt)
             }.sorted { $0.createdAt > $1.createdAt }
