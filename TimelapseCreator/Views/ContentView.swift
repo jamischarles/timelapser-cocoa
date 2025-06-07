@@ -20,87 +20,143 @@ struct ContentView: View {
         }
     }
     
+    @ViewBuilder
     var body: some View {
-        NavigationSplitView {
-            // Sidebar
-            List(selection: $selectedTab) {
-                Section("Capture") {
-                    NavigationLink(value: 0) {
-                        Label("Live Capture", systemImage: "camera")
-                    }
-                    
-                    NavigationLink(value: 1) {
-                        Label("Gallery", systemImage: "photo.stack")
-                    }
-                }
-                
-                Section("Projects") {
-                    NavigationLink(value: 2) {
-                        Label("Recent Projects", systemImage: "folder")
-                    }
-                    
-                    NavigationLink(value: 3) {
-                        Label("Create Video", systemImage: "video")
-                    }
-                }
-                
-                Section("Performance") {
-                    NavigationLink(value: 4) {
-                        Label("Diagnostics", systemImage: "speedometer")
-                    }
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 250)
-        } detail: {
-            // Main content area
-            Group {
-                switch selectedTab {
-                case 0:
-                    CaptureView()
-                case 1:
-                    GalleryView(startCaptureAction: {
-                        selectedTab = 0
-                        startCaptureWithAutoProject()
-                    })
-                case 2:
-                    ProjectsView()
-                case 3:
-                    VideoGenerationView()
-                case 4:
-                    DiagnosticsView()
-                default:
-                    CaptureView()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .navigationTitle("Timelapse Creator")
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if screenshotManager.isCapturing {
-                    Button("Stop") {
-                        Task {
-                            await screenshotManager.stopCapture()
+        if #available(macOS 13.0, *) {
+            NavigationSplitView {
+                // Sidebar
+                List(selection: $selectedTab) {
+                    Section("Capture") {
+                        NavigationLink(value: 0) {
+                            Label("Live Capture", systemImage: "camera")
+                        }
+                        
+                        NavigationLink(value: 1) {
+                            Label("Gallery", systemImage: "photo.stack")
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                } else {
-                    Button("Start Capture") {
-                        startCaptureWithAutoProject()
+                    
+                    Section("Projects") {
+                        NavigationLink(value: 2) {
+                            Label("Recent Projects", systemImage: "folder")
+                        }
+                        
+                        NavigationLink(value: 3) {
+                            Label("Create Video", systemImage: "video")
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    
+                    Section("Performance") {
+                        NavigationLink(value: 4) {
+                            Label("Diagnostics", systemImage: "speedometer")
+                        }
+                    }
                 }
-                
-                Button("New Project") {
-                    projectManager.createNewProject()
+                .navigationSplitViewColumnWidth(min: 200, ideal: 250)
+            } detail: {
+                // Main content area
+                Group {
+                    switch selectedTab {
+                    case 0:
+                        CaptureView()
+                    case 1:
+                        GalleryView(startCaptureAction: {
+                            selectedTab = 0
+                            startCaptureWithAutoProject()
+                        })
+                    case 2:
+                        ProjectsView()
+                    case 3:
+                        VideoGenerationView()
+                    case 4:
+                        DiagnosticsView()
+                    default:
+                        CaptureView()
+                    }
                 }
-                .controlSize(.regular)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        }
-        .onAppear {
-            screenshotManager.checkPermissions()
+            .navigationTitle("Timelapse Creator")
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    if screenshotManager.isCapturing {
+                        Button("Stop") {
+                            Task {
+                                await screenshotManager.stopCapture()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    } else {
+                        Button("Start Capture") {
+                            startCaptureWithAutoProject()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    }
+                    
+                    Button("New Project") {
+                        projectManager.createNewProject()
+                    }
+                    .controlSize(.regular)
+                }
+            }
+            .onAppear {
+                screenshotManager.checkPermissions()
+            }
+        } else {
+            // Fallback for older macOS versions
+            HSplitView {
+                // Sidebar
+                VStack {
+                    List {
+                        Group {
+                            Button(action: { selectedTab = 0 }) {
+                                Label("Live Capture", systemImage: "camera")
+                            }
+                            Button(action: { selectedTab = 1 }) {
+                                Label("Gallery", systemImage: "photo.stack")
+                            }
+                            Button(action: { selectedTab = 2 }) {
+                                Label("Recent Projects", systemImage: "folder")
+                            }
+                            Button(action: { selectedTab = 3 }) {
+                                Label("Create Video", systemImage: "video")
+                            }
+                            Button(action: { selectedTab = 4 }) {
+                                Label("Diagnostics", systemImage: "speedometer")
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(minWidth: 200, idealWidth: 250)
+                
+                // Main content area
+                Group {
+                    switch selectedTab {
+                    case 0:
+                        CaptureView()
+                    case 1:
+                        GalleryView(startCaptureAction: {
+                            selectedTab = 0
+                            startCaptureWithAutoProject()
+                        })
+                    case 2:
+                        ProjectsView()
+                    case 3:
+                        VideoGenerationView()
+                    case 4:
+                        DiagnosticsView()
+                    default:
+                        CaptureView()
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .onAppear {
+                screenshotManager.checkPermissions()
+            }
         }
     }
 }
@@ -438,61 +494,39 @@ struct GalleryView: View {
     
     // MARK: - Gallery Grid View
     private var galleryGridView: some View {
-        GeometryReader { geometry in
-            let baseCanvasHeight: CGFloat = geometry.size.height * 0.5 // Half screen minimum
-            let zoomFactor = thumbnailSize / 150.0 // 150 is the base size
-            let canvasHeight = max(baseCanvasHeight, baseCanvasHeight * zoomFactor)
-            let canvasWidth = geometry.size.width * min(1.0, 0.6 + (zoomFactor * 0.4)) // Expand width too
-            
-            ScrollView([.horizontal, .vertical]) {
-                let gridSpacing = max(16, thumbnailSize * 0.1) // Dynamic spacing based on thumbnail size
-                LazyVGrid(columns: [
-                    GridItem(.adaptive(minimum: thumbnailSize, maximum: thumbnailSize + 50), spacing: gridSpacing)
-                ], spacing: gridSpacing) {
-                    ForEach(screenshots, id: \.self) { screenshotURL in
-                        ThumbnailView(
-                            imageURL: screenshotURL,
-                            thumbnailSize: thumbnailSize,
-                            isSelected: selectedScreenshots.contains(screenshotURL),
-                            onTap: {
-                                if selectedScreenshots.isEmpty {
-                                    // Single tap for preview
-                                    previewImage = screenshotURL
-                                    showingPreview = true
-                                } else {
-                                    // Multi-selection mode
-                                    toggleSelection(screenshotURL)
-                                }
-                            },
-                            onLongPress: {
+        ScrollView(.vertical) {
+            let gridSpacing = max(16, thumbnailSize * 0.1) // Dynamic spacing based on thumbnail size
+            LazyVGrid(columns: [
+                GridItem(.adaptive(minimum: thumbnailSize, maximum: thumbnailSize + 50), spacing: gridSpacing)
+            ], spacing: gridSpacing) {
+                ForEach(screenshots, id: \.self) { screenshotURL in
+                    ThumbnailView(
+                        imageURL: screenshotURL,
+                        thumbnailSize: thumbnailSize,
+                        isSelected: selectedScreenshots.contains(screenshotURL),
+                        onTap: {
+                            if selectedScreenshots.isEmpty {
+                                // Single tap for preview
+                                previewImage = screenshotURL
+                                showingPreview = true
+                            } else {
+                                // Multi-selection mode
                                 toggleSelection(screenshotURL)
                             }
-                        )
-                        .scaleEffect(selectedScreenshots.contains(screenshotURL) ? 0.95 : 1.0)
-                        .animation(.easeInOut(duration: 0.2), value: selectedScreenshots.contains(screenshotURL))
-                        .id(screenshotURL) // Ensure proper identity for animations
-                    }
+                        },
+                        onLongPress: {
+                            toggleSelection(screenshotURL)
+                        }
+                    )
+                    .scaleEffect(selectedScreenshots.contains(screenshotURL) ? 0.95 : 1.0)
+                    .animation(.easeInOut(duration: 0.2), value: selectedScreenshots.contains(screenshotURL))
+                    .id(screenshotURL) // Ensure proper identity for animations
                 }
-                .padding()
-                .frame(
-                    minWidth: canvasWidth,
-                    minHeight: canvasHeight,
-                    alignment: .topLeading
-                )
-                .animation(.easeInOut(duration: 0.3), value: thumbnailSize) // Smooth size transitions
             }
-            .frame(
-                width: canvasWidth,
-                height: canvasHeight
-            )
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(12)
-            .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
-            .position(
-                x: geometry.size.width * 0.5,
-                y: geometry.size.height * 0.5
-            )
+            .padding()
+            .animation(.easeInOut(duration: 0.3), value: thumbnailSize) // Smooth size transitions
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) {
             if isLoading {
                 ProgressView()

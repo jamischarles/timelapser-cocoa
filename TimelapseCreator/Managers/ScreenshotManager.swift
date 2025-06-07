@@ -399,7 +399,7 @@ class ScreenshotManager: ObservableObject {
         
         switch _captureAreaMode {
         case 0: // Full screen (all displays)
-            print("🎯 Full screen capture using CGDisplayCreateImage")
+            print("🎯 Full screen capture using CGWindowListCreateImage")
             
             // Check screen recording permissions first
             if !CGPreflightScreenCaptureAccess() {
@@ -409,15 +409,19 @@ class ScreenshotManager: ObservableObject {
                 return .failure(ScreenshotError.captureFailure)
             }
             
-            // Use CGDisplayCreateImage to capture the entire main display
-            let displayID = CGMainDisplayID()
-            cgImage = CGDisplayCreateImage(displayID)
+            // Use CGWindowListCreateImage to capture all windows on all displays
+            cgImage = CGWindowListCreateImage(
+                .null,  // Capture entire desktop across all displays
+                .optionOnScreenOnly,
+                kCGNullWindowID,
+                .bestResolution
+            )
             
             if cgImage == nil {
-                print("❌ CGDisplayCreateImage failed - check screen recording permissions")
+                print("❌ CGWindowListCreateImage failed - check screen recording permissions")
                 return .failure(ScreenshotError.captureFailure)
             } else {
-                print("✅ Successfully captured entire display including all windows")
+                print("✅ Successfully captured entire desktop with all windows across all displays")
             }
 
         case 1: // Main display only

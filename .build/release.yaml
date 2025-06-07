@@ -1,0 +1,66 @@
+client:
+  name: basic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "TimelapseCreator-release.exe": ["<TimelapseCreator-release.exe>"]
+  "TimelapseCreator-release.module": ["<TimelapseCreator-release.module>"]
+  "main": ["<TimelapseCreator-release.exe>","<TimelapseCreator-release.module>"]
+  "test": ["<TimelapseCreator-release.exe>","<TimelapseCreator-release.module>"]
+default: "main"
+nodes:
+  "/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+commands:
+  "/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator_TimelapseCreator.bundle/Assets.xcassets":
+    tool: copy-tool
+    inputs: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Resources/Assets.xcassets/"]
+    outputs: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator_TimelapseCreator.bundle/Assets.xcassets/"]
+    description: "Copying /Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Resources/Assets.xcassets"
+
+  "<TimelapseCreator-release.exe>":
+    tool: phony
+    inputs: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator"]
+    outputs: ["<TimelapseCreator-release.exe>"]
+
+  "<TimelapseCreator-release.module>":
+    tool: phony
+    inputs: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/App/TimelapseCreatorApp.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ProjectManager.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ScreenshotManager.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ThumbnailGenerator.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/VideoGenerator.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Views/ContentView.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/resource_bundle_accessor.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.swiftmodule"]
+    outputs: ["<TimelapseCreator-release.module>"]
+
+  "C.TimelapseCreator-release.exe":
+    tool: shell
+    inputs: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/App/TimelapseCreatorApp.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ProjectManager.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ScreenshotManager.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ThumbnailGenerator.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/VideoGenerator.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Views/ContentView.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/resource_bundle_accessor.swift.o"]
+    outputs: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator"]
+    description: "Linking ./.build/x86_64-apple-macosx/release/TimelapseCreator"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-g","-L","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release","-o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator","-module-name","TimelapseCreator","-emit-executable","-Xlinker","-dead_strip","-Xlinker","-alias","-Xlinker","_TimelapseCreator_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.product/Objects.LinkFileList","-target","x86_64-apple-macosx12.0","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.2.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib"]
+
+  "C.TimelapseCreator-release.module":
+    tool: swift-compiler
+    inputs: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/App/TimelapseCreatorApp.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Managers/ProjectManager.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Managers/ScreenshotManager.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Managers/ThumbnailGenerator.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Managers/VideoGenerator.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Views/ContentView.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/DerivedSources/resource_bundle_accessor.swift","<TimelapseCreator-release.module-resources>"]
+    outputs: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/App/TimelapseCreatorApp.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ProjectManager.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ScreenshotManager.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ThumbnailGenerator.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/VideoGenerator.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Views/ContentView.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/resource_bundle_accessor.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.swiftmodule"]
+    executable: "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    module-name: "TimelapseCreator"
+    module-output-path: "/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.swiftmodule"
+    import-paths: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release"]
+    temps-path: "/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build"
+    objects: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/App/TimelapseCreatorApp.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ProjectManager.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ScreenshotManager.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/ThumbnailGenerator.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Managers/VideoGenerator.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/Views/ContentView.swift.o","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/resource_bundle_accessor.swift.o"]
+    other-args: ["-target","x86_64-apple-macosx12.0","-swift-version","5","-O","-g","-j4","-DSWIFT_PACKAGE","-module-cache-path","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","TimelapseCreator_main","-color-diagnostics","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.2.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.2.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-fPIC","-package-name","timelapser_cocoa"]
+    sources: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/App/TimelapseCreatorApp.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Managers/ProjectManager.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Managers/ScreenshotManager.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Managers/ThumbnailGenerator.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Managers/VideoGenerator.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/Views/ContentView.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator.build/DerivedSources/resource_bundle_accessor.swift"]
+    is-library: false
+    enable-whole-module-optimization: true
+    num-threads: 4
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/TimelapseCreator/","/Users/jamismcharles/dev_freelance/timelapser_cocoa/Package.swift","/Users/jamismcharles/dev_freelance/timelapser_cocoa/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+
+  "TimelapseCreator-release.module-resources":
+    tool: phony
+    inputs: ["/Users/jamismcharles/dev_freelance/timelapser_cocoa/.build/x86_64-apple-macosx/release/TimelapseCreator_TimelapseCreator.bundle/Assets.xcassets/"]
+    outputs: ["<TimelapseCreator-release.module-resources>"]
+

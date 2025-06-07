@@ -31,7 +31,6 @@ struct TimelapseCreatorApp: App {
                 }
         }
         .windowStyle(.titleBar)
-        .windowResizability(.contentSize)
         
         // Settings window
         Settings {
@@ -282,7 +281,6 @@ struct SettingsView: View {
                 }
             }
         }
-        .formStyle(.grouped)
         .frame(width: 500, height: 450)
     }
 } 
