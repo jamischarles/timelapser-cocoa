@@ -1,0 +1,92 @@
+name: Build and Release macOS App
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag'
+        required: true
+        type: string
+
+env:
+  APP_NAME: "TimelapseCreator"
+  BUNDLE_ID: "com.example.timelapsecreator"
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Build Release App
+        run: |
+          echo "Building Release version..."
+          swift build -c release
+          
+          # Create .app bundle structure
+          mkdir -p "build/${{ env.APP_NAME }}.app/Contents/MacOS"
+          mkdir -p "build/${{ env.APP_NAME }}.app/Contents/Resources"
+          
+          # Copy executable
+          cp ".build/release/${{ env.APP_NAME }}" "build/${{ env.APP_NAME }}.app/Contents/MacOS/"
+          
+          # Create Info.plist
+          cat > "build/${{ env.APP_NAME }}.app/Contents/Info.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>${{ env.APP_NAME }}</string>
+              <key>CFBundleIdentifier</key>
+              <string>${{ env.BUNDLE_ID }}</string>
+              <key>CFBundleName</key>
+              <string>${{ env.APP_NAME }}</string>
+              <key>CFBundleVersion</key>
+              <string>${{ github.event.release.tag_name || github.event.inputs.tag }}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${{ github.event.release.tag_name || github.event.inputs.tag }}</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>12.0</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Create DMG
+        run: |
+          create-dmg \
+            --volname "${{ env.APP_NAME }} Installer" \
+            --volicon "TimelapseCreator/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png" \
+            --window-pos 200 120 \
+            --window-size 600 300 \
+            --icon-size 100 \
+            --icon "${{ env.APP_NAME }}.app" 175 120 \
+            --hide-extension "${{ env.APP_NAME }}.app" \
+            --app-drop-link 425 120 \
+            "build/${{ env.APP_NAME }}-${{ github.event.release.tag_name || github.event.inputs.tag }}.dmg" \
+            "build/${{ env.APP_NAME }}.app"
+
+      - name: Upload DMG to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/*.dmg
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload DMG as Artifact (Manual trigger)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-dmg
+          path: build/*.dmg 

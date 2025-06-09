@@ -1,0 +1,259 @@
+name: Advanced Build and Release macOS App
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag'
+        required: true
+        type: string
+
+env:
+  APP_NAME: "TimelapseCreator"
+  BUNDLE_ID: "com.example.timelapsecreator"
+
+jobs:
+  build-universal-and-release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install zstd for faster caching
+        run: brew install zstd create-dmg
+
+      - name: Restore .build cache
+        id: restore-build
+        uses: actions/cache/restore@v4
+        with:
+          path: .build
+          key: "swiftpm-release-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}"
+          restore-keys: "swiftpm-release-${{ runner.os }}-"
+
+      # Set up Apple Certificate and Provisioning Profile
+      - name: Install Apple Certificate
+        if: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          # Create variables
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          # Import certificate from secrets
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Import certificate to keychain
+          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Build Universal Binary
+        run: |
+          echo "Building Universal Release version (Intel + Apple Silicon)..."
+          swift build -c release --arch x86_64 --arch arm64
+          
+          # Create .app bundle structure
+          mkdir -p "build/${{ env.APP_NAME }}.app/Contents/MacOS"
+          mkdir -p "build/${{ env.APP_NAME }}.app/Contents/Resources"
+          
+          # Get the build path for universal binary
+          BUILD_PATH=$(swift build -c release --arch x86_64 --arch arm64 --show-bin-path)
+          
+          # Copy universal executable
+          cp "$BUILD_PATH/${{ env.APP_NAME }}" "build/${{ env.APP_NAME }}.app/Contents/MacOS/"
+          
+          # Verify it's universal
+          file "build/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}"
+          
+          # Copy app icon if it exists
+          if [ -f "TimelapseCreator/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png" ]; then
+            cp "TimelapseCreator/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png" "build/${{ env.APP_NAME }}.app/Contents/Resources/AppIcon.icns"
+          fi
+          
+          # Create comprehensive Info.plist
+          cat > "build/${{ env.APP_NAME }}.app/Contents/Info.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>${{ env.APP_NAME }}</string>
+              <key>CFBundleIdentifier</key>
+              <string>${{ env.BUNDLE_ID }}</string>
+              <key>CFBundleName</key>
+              <string>${{ env.APP_NAME }}</string>
+              <key>CFBundleDisplayName</key>
+              <string>${{ env.APP_NAME }}</string>
+              <key>CFBundleVersion</key>
+              <string>${{ github.event.release.tag_name || github.event.inputs.tag }}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${{ github.event.release.tag_name || github.event.inputs.tag }}</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>12.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSRequiresAquaSystemAppearance</key>
+              <false/>
+              <key>LSApplicationCategoryType</key>
+              <string>public.app-category.photography</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Cache .build
+        if: steps.restore-build.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .build
+          key: "swiftpm-release-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}"
+
+      - name: Code Sign App
+        if: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+        run: |
+          # Sign the app bundle with hardened runtime
+          codesign --sign "$CODESIGN_IDENTITY" \
+            --options runtime \
+            --timestamp \
+            --deep \
+            --force \
+            "build/${{ env.APP_NAME }}.app"
+          
+          # Verify signing
+          codesign --verify --verbose "build/${{ env.APP_NAME }}.app"
+          spctl --assess --verbose "build/${{ env.APP_NAME }}.app"
+
+      - name: Create Professional DMG
+        run: |
+          # Create an attractive DMG with custom background
+          create-dmg \
+            --volname "${{ env.APP_NAME }} Installer" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 120 \
+            --icon "${{ env.APP_NAME }}.app" 150 200 \
+            --hide-extension "${{ env.APP_NAME }}.app" \
+            --app-drop-link 450 200 \
+            --format UDZO \
+            --filesystem HFS+ \
+            "build/${{ env.APP_NAME }}-${{ github.event.release.tag_name || github.event.inputs.tag }}-universal.dmg" \
+            "build/${{ env.APP_NAME }}.app"
+
+      - name: Code Sign DMG
+        if: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+        run: |
+          codesign --sign "$CODESIGN_IDENTITY" \
+            --timestamp \
+            "build/${{ env.APP_NAME }}-${{ github.event.release.tag_name || github.event.inputs.tag }}-universal.dmg"
+
+      - name: Notarize DMG
+        if: ${{ secrets.APPLE_ID && secrets.APPLE_APP_SPECIFIC_PASSWORD && secrets.APPLE_TEAM_ID }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Submit for notarization with better error handling
+          echo "Submitting for notarization..."
+          NOTARIZATION_ID=$(xcrun notarytool submit \
+            "build/${{ env.APP_NAME }}-${{ github.event.release.tag_name || github.event.inputs.tag }}-universal.dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait \
+            --timeout 30m \
+            --output-format json | jq -r '.id')
+          
+          echo "Notarization ID: $NOTARIZATION_ID"
+          
+          # Check status
+          xcrun notarytool info "$NOTARIZATION_ID" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID"
+          
+          # Staple the notarization ticket
+          echo "Stapling notarization ticket..."
+          xcrun stapler staple "build/${{ env.APP_NAME }}-${{ github.event.release.tag_name || github.event.inputs.tag }}-universal.dmg"
+          
+          # Verify stapling
+          xcrun stapler validate "build/${{ env.APP_NAME }}-${{ github.event.release.tag_name || github.event.inputs.tag }}-universal.dmg"
+
+      - name: Generate Release Notes
+        id: release-notes
+        run: |
+          cat > release-notes.md << EOF
+          ## ${{ env.APP_NAME }} ${{ github.event.release.tag_name || github.event.inputs.tag }}
+          
+          ### Download
+          - **Universal Binary (Intel + Apple Silicon)**: TimelapseCreator-${{ github.event.release.tag_name || github.event.inputs.tag }}-universal.dmg
+          
+          ### Features
+          - Full-screen screenshot capture at 5262×2882 pixels
+          - Project-based organization with auto-creation
+          - Advanced video generation with AVFoundation
+          - Hardware-accelerated thumbnail generation
+          - Variable frame pacing and speed controls
+          - Professional video export options
+          
+          ### System Requirements
+          - macOS 12.0 or later
+          - Works on both Intel and Apple Silicon Macs
+          
+          ### Installation
+          1. Download the DMG file
+          2. Open it and drag ${{ env.APP_NAME }} to Applications
+          3. Run the app from Applications folder
+          
+          ${{ github.event_name == 'release' && github.event.release.body || 'Manual release build' }}
+          EOF
+
+      - name: Upload DMG to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/*.dmg
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body_path: release-notes.md
+
+      - name: Upload DMG as Artifact (Manual trigger)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-universal-dmg
+          path: |
+            build/*.dmg
+            release-notes.md
+
+      - name: Print Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **App**: ${{ env.APP_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ github.event.release.tag_name || github.event.inputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Architecture**: Universal (Intel + Apple Silicon)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Signed**: ${{ secrets.BUILD_CERTIFICATE_BASE64 && 'Yes' || 'No' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Notarized**: ${{ secrets.APPLE_ID && 'Yes' || 'No' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **DMG Size**: $(ls -lh build/*.dmg | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
+
+      - name: Clean up keychain
+        if: ${{ always() && secrets.BUILD_CERTIFICATE_BASE64 }}
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true 
