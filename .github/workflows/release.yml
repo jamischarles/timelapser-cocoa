@@ -30,44 +30,21 @@ jobs:
       - name: Build Release App
         run: |
           echo "Building Release version..."
-          swift build -c release
+          xcodebuild -project TimelapseCreator.xcodeproj \
+                     -scheme TimelapseCreator \
+                     -configuration Release \
+                     -derivedDataPath build \
+                     -archivePath build/TimelapseCreator.xcarchive \
+                     archive
           
-          # Create .app bundle structure
-          mkdir -p "build/${{ env.APP_NAME }}.app/Contents/MacOS"
-          mkdir -p "build/${{ env.APP_NAME }}.app/Contents/Resources"
-          
-          # Copy executable
-          cp ".build/release/${{ env.APP_NAME }}" "build/${{ env.APP_NAME }}.app/Contents/MacOS/"
-          
-          # Create Info.plist
-          cat > "build/${{ env.APP_NAME }}.app/Contents/Info.plist" << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>${{ env.APP_NAME }}</string>
-              <key>CFBundleIdentifier</key>
-              <string>${{ env.BUNDLE_ID }}</string>
-              <key>CFBundleName</key>
-              <string>${{ env.APP_NAME }}</string>
-              <key>CFBundleVersion</key>
-              <string>${{ github.event.release.tag_name || github.event.inputs.tag }}</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${{ github.event.release.tag_name || github.event.inputs.tag }}</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>12.0</string>
-          </dict>
-          </plist>
-          EOF
+          # Export the .app from the archive
+          mkdir -p build
+          cp -R build/TimelapseCreator.xcarchive/Products/Applications/${{ env.APP_NAME }}.app build/
 
       - name: Create DMG
         run: |
           create-dmg \
             --volname "${{ env.APP_NAME }} Installer" \
-            --volicon "TimelapseCreator/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png" \
             --window-pos 200 120 \
             --window-size 600 300 \
             --icon-size 100 \
