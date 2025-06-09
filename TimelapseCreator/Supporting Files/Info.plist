@@ -27,9 +27,13 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSupportsAutomaticTermination</key>
-	<true/>
+	<false/>
 	<key>NSSupportsSuddenTermination</key>
-	<true/>
+	<false/>
+	<key>LSUIElement</key>
+	<false/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.photography</string>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>This app needs access to your Desktop folder to save timelapse screenshots and projects.</string>
 	<key>NSDocumentsFolderUsageDescription</key>

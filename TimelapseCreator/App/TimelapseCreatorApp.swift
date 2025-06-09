@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 @main
 struct TimelapseCreatorApp: App {
@@ -28,6 +29,9 @@ struct TimelapseCreatorApp: App {
                     screenshotManager.setThumbnailGenerator(thumbnailGenerator)
                     // Connect project manager to screenshot manager
                     screenshotManager.setProjectManager(projectManager)
+                    
+                    // Ensure app shows in dock
+                    NSApp.setActivationPolicy(.regular)
                 }
         }
         .windowStyle(.titleBar)
@@ -39,6 +43,20 @@ struct TimelapseCreatorApp: App {
                 .environmentObject(projectManager)
                 .environmentObject(thumbnailGenerator)
         }
+    }
+    
+    // MARK: - App Lifecycle
+}
+
+// MARK: - App Delegate for proper lifecycle management
+class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false // Keep app running even when all windows are closed
+    }
+    
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Bring app to front when launched
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
