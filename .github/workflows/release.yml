@@ -35,6 +35,9 @@ jobs:
                      -configuration Release \
                      -derivedDataPath build \
                      -archivePath build/TimelapseCreator.xcarchive \
+                     CODE_SIGN_IDENTITY="" \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGNING_ALLOWED=NO \
                      archive
           
           # Export the .app from the archive
