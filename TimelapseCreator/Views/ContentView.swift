@@ -1229,6 +1229,15 @@ struct VideoGenerationView: View {
     @State private var errorMessage: String?
     @State private var showingVideoPreview = false
     
+    // Advanced pacing controls
+    @State private var showAdvancedPacing = false
+    @State private var selectedPacingMode: VideoSettings.PacingMode = .uniform
+    @State private var frameSkipPattern: FrameSkipPattern? = nil
+    @State private var speedZones: [SpeedZone] = []
+    @State private var frameRepetitions: [FrameRepetition] = []
+    @State private var showingSpeedZoneSheet = false
+    @State private var showingFrameRepetitionSheet = false
+    
     var body: some View {
         VStack(spacing: 20) {
             // Header
@@ -1348,7 +1357,7 @@ struct VideoGenerationView: View {
                     
                     Picker("FPS", selection: Binding(
                         get: { videoSettings.fps },
-                        set: { videoSettings = VideoSettings(fps: $0, resolution: videoSettings.resolution, quality: videoSettings.quality, format: videoSettings.format, duration: videoSettings.duration) }
+                        set: { videoSettings = createVideoSettings(fps: $0) }
                     )) {
                         Text("12 fps").tag(12.0)
                         Text("24 fps").tag(24.0)
@@ -1366,7 +1375,7 @@ struct VideoGenerationView: View {
                     
                     Picker("Quality", selection: Binding(
                         get: { videoSettings.quality },
-                        set: { videoSettings = VideoSettings(fps: videoSettings.fps, resolution: videoSettings.resolution, quality: $0, format: videoSettings.format, duration: videoSettings.duration) }
+                        set: { videoSettings = createVideoSettings(quality: $0) }
                     )) {
                         ForEach(VideoSettings.VideoQuality.allCases, id: \.self) { quality in
                             Text(quality.rawValue).tag(quality)
@@ -1422,11 +1431,19 @@ struct VideoGenerationView: View {
                 }
             }
             
+            // Advanced Pacing Controls
+            if !screenshots.isEmpty {
+                Divider()
+                    .padding(.top, 16)
+                
+                advancedPacingSection
+            }
+            
             // Video preview info
             if !screenshots.isEmpty {
                 HStack {
                     Text("Video duration:")
-                    Text(formatDuration(Double(screenshots.count) / videoSettings.fps))
+                    Text(formatDuration(calculateTotalDuration()))
                         .fontWeight(.medium)
                     
                     Spacer()
@@ -1443,6 +1460,180 @@ struct VideoGenerationView: View {
         .padding()
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
+    }
+    
+    // MARK: - Advanced Pacing Section
+    private var advancedPacingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Advanced Pacing")
+                    .font(.headline)
+                
+                Spacer()
+                
+                Button(showAdvancedPacing ? "Hide" : "Show") {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showAdvancedPacing.toggle()
+                    }
+                }
+                .buttonStyle(.borderless)
+                .foregroundColor(.accentColor)
+            }
+            
+            if showAdvancedPacing {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Pacing Mode
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Pacing Mode")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        Picker("Pacing Mode", selection: $selectedPacingMode) {
+                            ForEach(VideoSettings.PacingMode.allCases, id: \.self) { mode in
+                                Text(mode.rawValue).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .onChange(of: selectedPacingMode) { _ in
+                            updateVideoSettings()
+                        }
+                        
+                        Text(selectedPacingMode.description)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Divider()
+                    
+                    // Frame Skip Pattern
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Frame Skip Pattern")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        HStack {
+                            Picker("Skip Pattern", selection: $frameSkipPattern) {
+                                Text("Include All Frames").tag(nil as FrameSkipPattern?)
+                                Text("Skip Every Other (50%)").tag(FrameSkipPattern.skipHalf as FrameSkipPattern?)
+                                Text("Keep 1 in 3 (33%)").tag(FrameSkipPattern.skipTwoThirds as FrameSkipPattern?)
+                                Text("Keep 1 in 5 (20%)").tag(FrameSkipPattern.keepEveryFifth as FrameSkipPattern?)
+                            }
+                            .pickerStyle(.menu)
+                            .onChange(of: frameSkipPattern) { _ in
+                                updateVideoSettings()
+                            }
+                        }
+                        
+                        if let pattern = frameSkipPattern {
+                            Text("Will use \(pattern.keepFrameCount) out of every \(pattern.skipEveryNFrames) frames")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if selectedPacingMode == .variable {
+                        Divider()
+                        
+                        // Speed Zones
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Speed Zones")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                
+                                Spacer()
+                                
+                                Button("Add Zone") {
+                                    showingSpeedZoneSheet = true
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            
+                            if speedZones.isEmpty {
+                                Text("No speed zones defined. All frames will use normal speed.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            } else {
+                                ForEach(speedZones.indices, id: \.self) { index in
+                                    HStack {
+                                        Text(speedZones[index].description)
+                                            .font(.caption)
+                                        
+                                        Spacer()
+                                        
+                                        Button("Remove") {
+                                            speedZones.remove(at: index)
+                                            updateVideoSettings()
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .foregroundColor(.red)
+                                        .font(.caption)
+                                    }
+                                    .padding(.vertical, 2)
+                                }
+                            }
+                        }
+                    }
+                    
+                    if selectedPacingMode == .manual {
+                        Divider()
+                        
+                        // Frame Repetitions
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Frame Repetitions")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                
+                                Spacer()
+                                
+                                Button("Add Repetition") {
+                                    showingFrameRepetitionSheet = true
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            
+                            if frameRepetitions.isEmpty {
+                                Text("No frame repetitions defined. All frames will show once.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            } else {
+                                ForEach(frameRepetitions.indices, id: \.self) { index in
+                                    HStack {
+                                        Text(frameRepetitions[index].description)
+                                            .font(.caption)
+                                        
+                                        Spacer()
+                                        
+                                        Button("Remove") {
+                                            frameRepetitions.remove(at: index)
+                                            updateVideoSettings()
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .foregroundColor(.red)
+                                        .font(.caption)
+                                    }
+                                    .padding(.vertical, 2)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+        .sheet(isPresented: $showingSpeedZoneSheet) {
+            SpeedZoneSheet(screenshots: screenshots, speedZones: $speedZones) {
+                updateVideoSettings()
+            }
+        }
+        .sheet(isPresented: $showingFrameRepetitionSheet) {
+            FrameRepetitionSheet(screenshots: screenshots, frameRepetitions: $frameRepetitions) {
+                updateVideoSettings()
+            }
+        }
     }
     
     // MARK: - Progress Section
@@ -1612,28 +1803,7 @@ struct VideoGenerationView: View {
         }
     }
     
-    private func performVideoGeneration(outputURL: URL) {
-        errorMessage = nil
-        generatedVideoURL = nil
-        
-        Task {
-            do {
-                let resultURL = try await videoGenerator.generateVideo(
-                    from: screenshots,
-                    settings: videoSettings,
-                    outputURL: outputURL
-                )
-                
-                await MainActor.run {
-                    generatedVideoURL = resultURL
-                }
-            } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                }
-            }
-        }
-    }
+
     
     private func formatDuration(_ seconds: Double) -> String {
         let minutes = Int(seconds) / 60
@@ -1658,6 +1828,93 @@ struct VideoGenerationView: View {
         let duration = Double(screenshots.count) / videoSettings.fps
         let estimatedSize = Int64(Double(videoSettings.quality.bitRate) * duration / 8)
         return estimatedSize
+    }
+    
+    private func calculateTotalDuration() -> Double {
+        guard !screenshots.isEmpty else { return 0.0 }
+        
+        // Calculate effective frame count after applying skip pattern
+        let effectiveFrameCount: Int
+        if let pattern = frameSkipPattern {
+            let cycles = screenshots.count / pattern.skipEveryNFrames
+            let remainder = screenshots.count % pattern.skipEveryNFrames
+            effectiveFrameCount = cycles * pattern.keepFrameCount + min(remainder, pattern.keepFrameCount)
+        } else {
+            effectiveFrameCount = screenshots.count
+        }
+        
+        // Add frame repetitions if in manual mode
+        var totalFrames = effectiveFrameCount
+        if selectedPacingMode == .manual {
+            for repetition in frameRepetitions {
+                if repetition.frameIndex < screenshots.count {
+                    totalFrames += repetition.repetitionCount
+                }
+            }
+        }
+        
+        return Double(totalFrames) / videoSettings.fps
+    }
+    
+    private func updateVideoSettings() {
+        videoSettings = VideoSettings(
+            fps: videoSettings.fps,
+            resolution: videoSettings.resolution,
+            quality: videoSettings.quality,
+            format: videoSettings.format,
+            duration: videoSettings.duration,
+            pacingMode: selectedPacingMode,
+            frameSkipPattern: frameSkipPattern,
+            speedZones: speedZones,
+            frameRepetitions: frameRepetitions
+        )
+    }
+    
+    private func createVideoSettings(
+        fps: Double? = nil,
+        resolution: CGSize? = nil,
+        quality: VideoSettings.VideoQuality? = nil,
+        format: VideoSettings.VideoFormat? = nil,
+        duration: TimeInterval? = nil
+    ) -> VideoSettings {
+        return VideoSettings(
+            fps: fps ?? videoSettings.fps,
+            resolution: resolution ?? videoSettings.resolution,
+            quality: quality ?? videoSettings.quality,
+            format: format ?? videoSettings.format,
+            duration: duration ?? videoSettings.duration,
+            pacingMode: selectedPacingMode,
+            frameSkipPattern: frameSkipPattern,
+            speedZones: speedZones,
+            frameRepetitions: frameRepetitions
+        )
+    }
+    
+    // MARK: - Video Generation
+    private func performVideoGeneration(outputURL: URL) {
+        updateVideoSettings() // Ensure settings are current
+        
+        Task {
+            do {
+                let result = try await videoGenerator.generateVideo(
+                    from: screenshots,
+                    settings: videoSettings,
+                    outputURL: outputURL
+                ) { progress in
+                    // Progress is handled automatically by the generator
+                }
+                
+                await MainActor.run {
+                    generatedVideoURL = result
+                    errorMessage = nil
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    generatedVideoURL = nil
+                }
+            }
+        }
     }
 }
 
@@ -2618,6 +2875,195 @@ extension DateFormatter {
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         return formatter
     }()
+}
+
+// MARK: - Speed Zone Sheet
+struct SpeedZoneSheet: View {
+    let screenshots: [URL]
+    @Binding var speedZones: [SpeedZone]
+    let onUpdate: () -> Void
+    
+    @Environment(\.dismiss) private var dismiss
+    @State private var startFrame = 0
+    @State private var endFrame = 0
+    @State private var speedMultiplier = 1.0
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                Text("Create Speed Zone")
+                    .font(.headline)
+                
+                VStack(spacing: 16) {
+                    VStack(alignment: .leading) {
+                        Text("Frame Range")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        HStack {
+                            VStack {
+                                Text("Start Frame")
+                                TextField("Start", value: $startFrame, format: .number)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            
+                            Text("to")
+                                .padding(.horizontal)
+                            
+                            VStack {
+                                Text("End Frame")
+                                TextField("End", value: $endFrame, format: .number)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        }
+                        
+                        Text("Total frames: \(screenshots.count)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    VStack(alignment: .leading) {
+                        Text("Speed Multiplier: \(speedMultiplier, specifier: "%.1f")x")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        HStack {
+                            Text("0.1x")
+                                .font(.caption)
+                            
+                            Slider(value: $speedMultiplier, in: 0.1...5.0, step: 0.1)
+                            
+                            Text("5.0x")
+                                .font(.caption)
+                        }
+                        
+                        Text(speedMultiplier < 1.0 ? "Slower motion" : speedMultiplier > 1.0 ? "Faster motion" : "Normal speed")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                HStack {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .buttonStyle(.bordered)
+                    
+                    Spacer()
+                    
+                    Button("Add Zone") {
+                        let zone = SpeedZone(
+                            startFrame: max(0, min(startFrame, screenshots.count - 1)),
+                            endFrame: max(startFrame, min(endFrame, screenshots.count - 1)),
+                            speedMultiplier: speedMultiplier
+                        )
+                        speedZones.append(zone)
+                        onUpdate()
+                        dismiss()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(startFrame > endFrame || endFrame >= screenshots.count)
+                }
+            }
+            .padding()
+        }
+        .onAppear {
+            endFrame = max(0, screenshots.count - 1)
+        }
+    }
+}
+
+// MARK: - Frame Repetition Sheet
+struct FrameRepetitionSheet: View {
+    let screenshots: [URL]
+    @Binding var frameRepetitions: [FrameRepetition]
+    let onUpdate: () -> Void
+    
+    @Environment(\.dismiss) private var dismiss
+    @State private var frameIndex = 0
+    @State private var repetitionCount = 1
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                Text("Add Frame Repetition")
+                    .font(.headline)
+                
+                VStack(spacing: 16) {
+                    VStack(alignment: .leading) {
+                        Text("Frame Index: \(frameIndex)")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        HStack {
+                            Text("0")
+                                .font(.caption)
+                            
+                            Slider(value: Binding(
+                                get: { Double(frameIndex) },
+                                set: { frameIndex = Int($0) }
+                            ), in: 0...Double(max(0, screenshots.count - 1)), step: 1)
+                            
+                            Text("\(screenshots.count - 1)")
+                                .font(.caption)
+                        }
+                        
+                        Text("Frame \(frameIndex + 1) of \(screenshots.count)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    VStack(alignment: .leading) {
+                        Text("Repetition Count: \(repetitionCount)")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        HStack {
+                            Text("1")
+                                .font(.caption)
+                            
+                            Slider(value: Binding(
+                                get: { Double(repetitionCount) },
+                                set: { repetitionCount = Int($0) }
+                            ), in: 1...10, step: 1)
+                            
+                            Text("10")
+                                .font(.caption)
+                        }
+                        
+                        Text("Frame will repeat \(repetitionCount) additional time\(repetitionCount == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                HStack {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .buttonStyle(.bordered)
+                    
+                    Spacer()
+                    
+                    Button("Add Repetition") {
+                        let repetition = FrameRepetition(
+                            frameIndex: frameIndex,
+                            repetitionCount: repetitionCount
+                        )
+                        frameRepetitions.append(repetition)
+                        onUpdate()
+                        dismiss()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding()
+        }
+    }
 }
 
 #Preview {

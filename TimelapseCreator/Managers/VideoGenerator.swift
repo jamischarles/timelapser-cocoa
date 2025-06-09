@@ -20,6 +20,32 @@ struct VideoSettings {
     let format: VideoFormat
     let duration: TimeInterval? // Optional duration limit
     
+    // Advanced pacing controls
+    let pacingMode: PacingMode
+    let frameSkipPattern: FrameSkipPattern?
+    let speedZones: [SpeedZone]
+    let frameRepetitions: [FrameRepetition]
+    
+    enum PacingMode: String, CaseIterable {
+        case uniform = "Uniform"
+        case variable = "Variable"
+        case speedRamp = "Speed Ramp"
+        case manual = "Manual"
+        
+        var description: String {
+            switch self {
+            case .uniform:
+                return "All frames play at the same speed"
+            case .variable:
+                return "Different sections can have different speeds"
+            case .speedRamp:
+                return "Gradually changes speed from slow to fast to slow"
+            case .manual:
+                return "Manually control how long each frame displays"
+            }
+        }
+    }
+    
     enum VideoQuality: String, CaseIterable {
         case low = "Low"
         case medium = "Medium" 
@@ -69,8 +95,41 @@ struct VideoSettings {
         resolution: CGSize(width: 1920, height: 1080),
         quality: .high,
         format: .mp4,
-        duration: nil
+        duration: nil,
+        pacingMode: .uniform,
+        frameSkipPattern: nil,
+        speedZones: [],
+        frameRepetitions: []
     )
+}
+
+// MARK: - Frame Pacing Models
+struct FrameSkipPattern: Hashable, Equatable {
+    let skipEveryNFrames: Int
+    let keepFrameCount: Int
+    
+    static let skipHalf = FrameSkipPattern(skipEveryNFrames: 2, keepFrameCount: 1)
+    static let skipTwoThirds = FrameSkipPattern(skipEveryNFrames: 3, keepFrameCount: 1)
+    static let keepEveryFifth = FrameSkipPattern(skipEveryNFrames: 5, keepFrameCount: 1)
+}
+
+struct SpeedZone: Hashable, Equatable {
+    let startFrame: Int
+    let endFrame: Int
+    let speedMultiplier: Double
+    
+    var description: String {
+        return "Frames \(startFrame)-\(endFrame): \(speedMultiplier, specifier: "%.1f")x speed"
+    }
+}
+
+struct FrameRepetition: Hashable, Equatable {
+    let frameIndex: Int
+    let repetitionCount: Int
+    
+    var description: String {
+        return "Frame \(frameIndex): repeat \(repetitionCount) time\(repetitionCount == 1 ? "" : "s")"
+    }
 }
 
 // MARK: - Video Generation Progress
@@ -254,10 +313,15 @@ class VideoGenerator: ObservableObject {
         var frameIndex = 0
         let startTime = Date()
         
+        // Generate frame sequence with pacing controls
+        let frameSequence = generateFrameSequence(from: imageURLs, settings: settings)
+        
         return try await withCheckedThrowingContinuation { continuation in
             generationTask = Task {
                 do {
-                    for imageURL in imageURLs {
+                    var currentTime = CMTime.zero
+                    
+                    for frameInfo in frameSequence {
                         // Check for cancellation
                         if Task.isCancelled {
                             writer.cancelWriting()
@@ -271,7 +335,7 @@ class VideoGenerator: ObservableObject {
                         }
                         
                         // Load and process image
-                        guard let image = NSImage(contentsOf: imageURL),
+                        guard let image = NSImage(contentsOf: frameInfo.imageURL),
                               let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
                             continue // Skip invalid images
                         }
@@ -281,23 +345,23 @@ class VideoGenerator: ObservableObject {
                             continue
                         }
                         
-                        // Append pixel buffer
-                        let presentationTime = CMTime(value: Int64(frameIndex), timescale: CMTimeScale(settings.fps))
-                        
-                        if !adaptor.append(pixelBuffer, withPresentationTime: presentationTime) {
+                        // Append pixel buffer with custom duration
+                        if !adaptor.append(pixelBuffer, withPresentationTime: currentTime) {
                             print("⚠️ Failed to append frame \(frameIndex)")
                         }
                         
+                        // Advance time by frame duration
+                        currentTime = CMTimeAdd(currentTime, frameInfo.duration)
                         frameIndex += 1
                         
                         // Update progress
                         let elapsed = Date().timeIntervalSince(startTime)
-                        let estimated = frameIndex > 0 ? (elapsed / Double(frameIndex)) * Double(imageURLs.count - frameIndex) : nil
+                        let estimated = frameIndex > 0 ? (elapsed / Double(frameIndex)) * Double(frameSequence.count - frameIndex) : nil
                         let fileSize = getFileSize(at: outputURL)
                         
                         let currentProgress = VideoGenerationProgress(
                             currentFrame: frameIndex,
-                            totalFrames: imageURLs.count,
+                            totalFrames: frameSequence.count,
                             elapsedTime: elapsed,
                             estimatedTimeRemaining: estimated,
                             outputFileSize: fileSize
@@ -334,6 +398,115 @@ class VideoGenerator: ObservableObject {
                 }
             }
         }
+    }
+    
+    // MARK: - Frame Sequence Generation
+    private struct FrameInfo {
+        let imageURL: URL
+        let duration: CMTime
+        let originalIndex: Int
+    }
+    
+    private func generateFrameSequence(from imageURLs: [URL], settings: VideoSettings) -> [FrameInfo] {
+        var sequence: [FrameInfo] = []
+        let baseDuration = CMTime(value: 1, timescale: CMTimeScale(settings.fps))
+        
+        switch settings.pacingMode {
+        case .uniform:
+            // Standard uniform pacing
+            sequence = imageURLs.enumerated().compactMap { index, url in
+                if shouldIncludeFrame(index: index, pattern: settings.frameSkipPattern) {
+                    return FrameInfo(imageURL: url, duration: baseDuration, originalIndex: index)
+                }
+                return nil
+            }
+            
+        case .variable:
+            // Variable pacing based on speed zones
+            sequence = generateVariablePacingSequence(imageURLs: imageURLs, settings: settings, baseDuration: baseDuration)
+            
+        case .speedRamp:
+            // Gradual speed changes
+            sequence = generateSpeedRampSequence(imageURLs: imageURLs, settings: settings, baseDuration: baseDuration)
+            
+        case .manual:
+            // Manual frame repetitions
+            sequence = generateManualSequence(imageURLs: imageURLs, settings: settings, baseDuration: baseDuration)
+        }
+        
+        return sequence
+    }
+    
+    private func shouldIncludeFrame(index: Int, pattern: FrameSkipPattern?) -> Bool {
+        guard let pattern = pattern else { return true }
+        
+        let cyclePosition = index % pattern.skipEveryNFrames
+        return cyclePosition < pattern.keepFrameCount
+    }
+    
+    private func generateVariablePacingSequence(imageURLs: [URL], settings: VideoSettings, baseDuration: CMTime) -> [FrameInfo] {
+        var sequence: [FrameInfo] = []
+        
+        for (index, url) in imageURLs.enumerated() {
+            guard shouldIncludeFrame(index: index, pattern: settings.frameSkipPattern) else { continue }
+            
+            // Find applicable speed zone
+            let speedMultiplier = settings.speedZones.first { zone in
+                index >= zone.startFrame && index <= zone.endFrame
+            }?.speedMultiplier ?? 1.0
+            
+            // Adjust duration based on speed multiplier (inverse relationship)
+            let adjustedDuration = CMTime(
+                value: baseDuration.value,
+                timescale: CMTimeScale(Double(baseDuration.timescale) * speedMultiplier)
+            )
+            
+            sequence.append(FrameInfo(imageURL: url, duration: adjustedDuration, originalIndex: index))
+        }
+        
+        return sequence
+    }
+    
+    private func generateSpeedRampSequence(imageURLs: [URL], settings: VideoSettings, baseDuration: CMTime) -> [FrameInfo] {
+        var sequence: [FrameInfo] = []
+        let totalFrames = imageURLs.count
+        
+        for (index, url) in imageURLs.enumerated() {
+            guard shouldIncludeFrame(index: index, pattern: settings.frameSkipPattern) else { continue }
+            
+            // Create a speed ramp: slow at start, fast in middle, slow at end
+            let progress = Double(index) / Double(totalFrames - 1)
+            let speedMultiplier = 0.5 + 1.5 * sin(progress * .pi) // Creates a sine wave from 0.5x to 2x speed
+            
+            let adjustedDuration = CMTime(
+                value: baseDuration.value,
+                timescale: CMTimeScale(Double(baseDuration.timescale) * speedMultiplier)
+            )
+            
+            sequence.append(FrameInfo(imageURL: url, duration: adjustedDuration, originalIndex: index))
+        }
+        
+        return sequence
+    }
+    
+    private func generateManualSequence(imageURLs: [URL], settings: VideoSettings, baseDuration: CMTime) -> [FrameInfo] {
+        var sequence: [FrameInfo] = []
+        
+        for (index, url) in imageURLs.enumerated() {
+            guard shouldIncludeFrame(index: index, pattern: settings.frameSkipPattern) else { continue }
+            
+            sequence.append(FrameInfo(imageURL: url, duration: baseDuration, originalIndex: index))
+            
+            // Add repetitions for this frame
+            let repetition = settings.frameRepetitions.first { $0.frameIndex == index }
+            if let rep = repetition {
+                for _ in 0..<rep.repetitionCount {
+                    sequence.append(FrameInfo(imageURL: url, duration: baseDuration, originalIndex: index))
+                }
+            }
+        }
+        
+        return sequence
     }
     
     // MARK: - Helper Methods
