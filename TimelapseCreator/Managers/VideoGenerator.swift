@@ -119,7 +119,7 @@ struct SpeedZone: Hashable, Equatable {
     let speedMultiplier: Double
     
     var description: String {
-        return "Frames \(startFrame)-\(endFrame): \(speedMultiplier, specifier: "%.1f")x speed"
+        return "Frames \(startFrame)-\(endFrame): \(String(format: "%.1f", speedMultiplier))x speed"
     }
 }
 
@@ -309,7 +309,6 @@ class VideoGenerator: ObservableObject {
         writer.startSession(atSourceTime: .zero)
         
         // Process images
-        let frameRate = CMTime(value: 1, timescale: CMTimeScale(settings.fps))
         var frameIndex = 0
         let startTime = Date()
         

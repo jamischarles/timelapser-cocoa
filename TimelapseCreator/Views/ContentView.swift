@@ -1409,7 +1409,7 @@ struct VideoGenerationView: View {
                         default: // 1080p
                             size = CGSize(width: 1920, height: 1080)
                         }
-                        videoSettings = VideoSettings(fps: videoSettings.fps, resolution: size, quality: videoSettings.quality, format: videoSettings.format, duration: videoSettings.duration)
+                        videoSettings = createVideoSettings(resolution: size)
                     }
                 }
                 
@@ -1421,7 +1421,7 @@ struct VideoGenerationView: View {
                     
                     Picker("Format", selection: Binding(
                         get: { videoSettings.format },
-                        set: { videoSettings = VideoSettings(fps: videoSettings.fps, resolution: videoSettings.resolution, quality: videoSettings.quality, format: $0, duration: videoSettings.duration) }
+                        set: { videoSettings = createVideoSettings(format: $0) }
                     )) {
                         ForEach(VideoSettings.VideoFormat.allCases, id: \.self) { format in
                             Text(format.rawValue).tag(format)
@@ -2663,7 +2663,7 @@ struct VideoCreationSheet: View {
                             
                             Picker("FPS", selection: Binding(
                                 get: { videoSettings.fps },
-                                set: { videoSettings = VideoSettings(fps: $0, resolution: videoSettings.resolution, quality: videoSettings.quality, format: videoSettings.format, duration: videoSettings.duration) }
+                                set: { videoSettings = createVideoSettings(fps: $0) }
                             )) {
                                 Text("24 fps").tag(24.0)
                                 Text("30 fps").tag(30.0)
@@ -2680,7 +2680,7 @@ struct VideoCreationSheet: View {
                             
                             Picker("Quality", selection: Binding(
                                 get: { videoSettings.quality },
-                                set: { videoSettings = VideoSettings(fps: videoSettings.fps, resolution: videoSettings.resolution, quality: $0, format: videoSettings.format, duration: videoSettings.duration) }
+                                set: { videoSettings = createVideoSettings(quality: $0) }
                             )) {
                                 ForEach(VideoSettings.VideoQuality.allCases, id: \.self) { quality in
                                     Text(quality.rawValue).tag(quality)
@@ -2711,7 +2711,7 @@ struct VideoCreationSheet: View {
                                 default: // 1080p
                                     size = CGSize(width: 1920, height: 1080)
                                 }
-                                videoSettings = VideoSettings(fps: videoSettings.fps, resolution: size, quality: videoSettings.quality, format: videoSettings.format, duration: videoSettings.duration)
+                                videoSettings = createVideoSettings(resolution: size)
                             }
                         }
                         
@@ -2723,7 +2723,7 @@ struct VideoCreationSheet: View {
                             
                             Picker("Format", selection: Binding(
                                 get: { videoSettings.format },
-                                set: { videoSettings = VideoSettings(fps: videoSettings.fps, resolution: videoSettings.resolution, quality: videoSettings.quality, format: $0, duration: videoSettings.duration) }
+                                set: { videoSettings = createVideoSettings(format: $0) }
                             )) {
                                 ForEach(VideoSettings.VideoFormat.allCases, id: \.self) { format in
                                     Text(format.rawValue).tag(format)
@@ -2867,6 +2867,26 @@ struct VideoCreationSheet: View {
             }
         }
     }
+    
+    private func createVideoSettings(
+        fps: Double? = nil,
+        resolution: CGSize? = nil,
+        quality: VideoSettings.VideoQuality? = nil,
+        format: VideoSettings.VideoFormat? = nil,
+        duration: TimeInterval? = nil
+    ) -> VideoSettings {
+        return VideoSettings(
+            fps: fps ?? videoSettings.fps,
+            resolution: resolution ?? videoSettings.resolution,
+            quality: quality ?? videoSettings.quality,
+            format: format ?? videoSettings.format,
+            duration: duration ?? videoSettings.duration,
+            pacingMode: .uniform,
+            frameSkipPattern: nil,
+            speedZones: [],
+            frameRepetitions: []
+        )
+    }
 }
 
 extension DateFormatter {
@@ -2923,7 +2943,7 @@ struct SpeedZoneSheet: View {
                     }
                     
                     VStack(alignment: .leading) {
-                        Text("Speed Multiplier: \(speedMultiplier, specifier: "%.1f")x")
+                        Text("Speed Multiplier: \(String(format: "%.1f", speedMultiplier))x")
                             .font(.subheadline)
                             .fontWeight(.medium)
                         
