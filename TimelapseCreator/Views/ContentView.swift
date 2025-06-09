@@ -1217,10 +1217,447 @@ struct ProjectRowView: View {
 }
 
 struct VideoGenerationView: View {
+    @EnvironmentObject var projectManager: ProjectManager
+    @EnvironmentObject var videoGenerator: VideoGenerator
+    @State private var selectedProject: Project?
+    @State private var screenshots: [URL] = []
+    @State private var videoSettings = VideoSettings.default
+    @State private var selectedResolution = "1080p"
+    @State private var isLoadingScreenshots = false
+    @State private var showingSavePanel = false
+    @State private var generatedVideoURL: URL?
+    @State private var errorMessage: String?
+    @State private var showingVideoPreview = false
+    
     var body: some View {
-        Text("Video Generation - Coming Soon")
-            .font(.title)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 20) {
+            // Header
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Video Generation")
+                    .font(.title)
+                    .fontWeight(.bold)
+                
+                Text("Create timelapse videos from your screenshot projects")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            Divider()
+            
+            // Project selection
+            projectSelectionSection
+            
+            Divider()
+            
+            // Video settings (only show if project is selected)
+            if selectedProject != nil {
+                videoSettingsSection
+                
+                Divider()
+                
+                // Progress section
+                if videoGenerator.isGenerating || generatedVideoURL != nil {
+                    progressSection
+                } else {
+                    // Generate button
+                    generateButtonSection
+                }
+            }
+            
+            // Error message
+            if let errorMessage = errorMessage {
+                errorSection(errorMessage)
+            }
+            
+            Spacer()
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onAppear {
+            loadDefaultProject()
+        }
+        .onChange(of: selectedProject) { _ in
+            loadProjectScreenshots()
+        }
+    }
+    
+    // MARK: - Project Selection Section
+    private var projectSelectionSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Select Project")
+                .font(.headline)
+            
+            HStack {
+                Picker("Project", selection: $selectedProject) {
+                    Text("Choose a project...")
+                        .tag(nil as Project?)
+                    
+                    ForEach(projectManager.projects, id: \.id) { project in
+                        Text(project.name)
+                            .tag(project as Project?)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: 300)
+                
+                if isLoadingScreenshots {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
+                
+                Spacer()
+                
+                if !screenshots.isEmpty {
+                    Text("\(screenshots.count) images")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.accentColor.opacity(0.1))
+                        .cornerRadius(4)
+                }
+            }
+            
+            if selectedProject != nil && screenshots.isEmpty && !isLoadingScreenshots {
+                Text("⚠️ This project has no screenshots")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+    }
+    
+    // MARK: - Video Settings Section
+    private var videoSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Video Settings")
+                .font(.headline)
+            
+            LazyVGrid(columns: [
+                GridItem(.flexible()),
+                GridItem(.flexible())
+            ], spacing: 16) {
+                // Frame Rate
+                VStack(alignment: .leading) {
+                    Text("Frame Rate")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Picker("FPS", selection: Binding(
+                        get: { videoSettings.fps },
+                        set: { videoSettings = VideoSettings(fps: $0, resolution: videoSettings.resolution, quality: videoSettings.quality, format: videoSettings.format, duration: videoSettings.duration) }
+                    )) {
+                        Text("12 fps").tag(12.0)
+                        Text("24 fps").tag(24.0)
+                        Text("30 fps").tag(30.0)
+                        Text("60 fps").tag(60.0)
+                    }
+                    .pickerStyle(.menu)
+                }
+                
+                // Quality
+                VStack(alignment: .leading) {
+                    Text("Quality")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Picker("Quality", selection: Binding(
+                        get: { videoSettings.quality },
+                        set: { videoSettings = VideoSettings(fps: videoSettings.fps, resolution: videoSettings.resolution, quality: $0, format: videoSettings.format, duration: videoSettings.duration) }
+                    )) {
+                        ForEach(VideoSettings.VideoQuality.allCases, id: \.self) { quality in
+                            Text(quality.rawValue).tag(quality)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                
+                // Resolution
+                VStack(alignment: .leading) {
+                    Text("Resolution")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Picker("Resolution", selection: $selectedResolution) {
+                        Text("720p").tag("720p")
+                        Text("1080p").tag("1080p")
+                        Text("1440p").tag("1440p")
+                        Text("4K").tag("4K")
+                    }
+                    .pickerStyle(.menu)
+                    .onChange(of: selectedResolution) { resolution in
+                        let size: CGSize
+                        switch resolution {
+                        case "720p":
+                            size = CGSize(width: 1280, height: 720)
+                        case "1440p":
+                            size = CGSize(width: 2560, height: 1440)
+                        case "4K":
+                            size = CGSize(width: 3840, height: 2160)
+                        default: // 1080p
+                            size = CGSize(width: 1920, height: 1080)
+                        }
+                        videoSettings = VideoSettings(fps: videoSettings.fps, resolution: size, quality: videoSettings.quality, format: videoSettings.format, duration: videoSettings.duration)
+                    }
+                }
+                
+                // Format
+                VStack(alignment: .leading) {
+                    Text("Format")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Picker("Format", selection: Binding(
+                        get: { videoSettings.format },
+                        set: { videoSettings = VideoSettings(fps: videoSettings.fps, resolution: videoSettings.resolution, quality: videoSettings.quality, format: $0, duration: videoSettings.duration) }
+                    )) {
+                        ForEach(VideoSettings.VideoFormat.allCases, id: \.self) { format in
+                            Text(format.rawValue).tag(format)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+            
+            // Video preview info
+            if !screenshots.isEmpty {
+                HStack {
+                    Text("Video duration:")
+                    Text(formatDuration(Double(screenshots.count) / videoSettings.fps))
+                        .fontWeight(.medium)
+                    
+                    Spacer()
+                    
+                    Text("Estimated size:")
+                    Text(formatFileSize(estimateVideoSize()))
+                        .fontWeight(.medium)
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.top, 8)
+            }
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+    }
+    
+    // MARK: - Progress Section
+    private var progressSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if videoGenerator.isGenerating {
+                Text("Generating Video...")
+                    .font(.headline)
+                
+                if let progress = videoGenerator.progress {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("\(Int(progress.percentage))%")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            
+                            Spacer()
+                            
+                            if let remaining = progress.estimatedTimeRemaining {
+                                Text("~\(Int(remaining))s remaining")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        
+                        ProgressView(value: progress.percentage / 100)
+                        
+                        HStack {
+                            Text("Frame \(progress.currentFrame) of \(progress.totalFrames)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            Spacer()
+                            
+                            Text(progress.formattedFileSize)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                
+                Button("Cancel") {
+                    videoGenerator.cancelGeneration()
+                }
+                .buttonStyle(.bordered)
+            } else if let generatedVideoURL = generatedVideoURL {
+                VStack(spacing: 12) {
+                    Text("✅ Video created successfully!")
+                        .font(.headline)
+                        .foregroundColor(.green)
+                    
+                    HStack(spacing: 12) {
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.selectFile(generatedVideoURL.path, inFileViewerRootedAtPath: "")
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Button("Play Video") {
+                            NSWorkspace.shared.open(generatedVideoURL)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        
+                        Button("Create Another") {
+                            self.generatedVideoURL = nil
+                            self.errorMessage = nil
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+    }
+    
+    // MARK: - Generate Button Section
+    private var generateButtonSection: some View {
+        VStack(spacing: 12) {
+            Button("Generate Video") {
+                generateVideo()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(screenshots.isEmpty)
+            
+            if screenshots.isEmpty {
+                Text("Select a project with screenshots to generate a video")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+    
+    // MARK: - Error Section
+    private func errorSection(_ message: String) -> some View {
+        Text(message)
+            .foregroundColor(.red)
+            .padding()
+            .background(Color.red.opacity(0.1))
+            .cornerRadius(8)
+    }
+    
+    // MARK: - Helper Methods
+    private func loadDefaultProject() {
+        if selectedProject == nil {
+            selectedProject = projectManager.currentProject ?? projectManager.projects.first
+        }
+    }
+    
+    private func loadProjectScreenshots() {
+        guard let project = selectedProject else {
+            screenshots = []
+            return
+        }
+        
+        isLoadingScreenshots = true
+        
+        Task {
+            let projectScreenshots = await withTaskGroup(of: [URL].self) { group in
+                group.addTask {
+                    let enumerator = FileManager.default.enumerator(
+                        at: project.url,
+                        includingPropertiesForKeys: [.nameKey, .creationDateKey],
+                        options: [.skipsHiddenFiles]
+                    )
+                    
+                    var urls: [URL] = []
+                    while let fileURL = enumerator?.nextObject() as? URL {
+                        if fileURL.pathExtension.lowercased() == "jpg" || fileURL.pathExtension.lowercased() == "jpeg" {
+                            urls.append(fileURL)
+                        }
+                    }
+                    
+                    return urls.sorted { url1, url2 in
+                        guard let date1 = try? url1.resourceValues(forKeys: [.creationDateKey]).creationDate,
+                              let date2 = try? url2.resourceValues(forKeys: [.creationDateKey]).creationDate else {
+                            return url1.lastPathComponent < url2.lastPathComponent
+                        }
+                        return date1 < date2
+                    }
+                }
+                
+                var allScreenshots: [URL] = []
+                for await screenshots in group {
+                    allScreenshots.append(contentsOf: screenshots)
+                }
+                return allScreenshots
+            }
+            
+            await MainActor.run {
+                screenshots = projectScreenshots
+                isLoadingScreenshots = false
+            }
+        }
+    }
+    
+    private func generateVideo() {
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.mpeg4Movie]
+        savePanel.nameFieldStringValue = "\(selectedProject?.name ?? "Timelapse")_\(DateFormatter.fileNameFormatter.string(from: Date())).mp4"
+        
+        savePanel.begin { response in
+            if response == .OK, let url = savePanel.url {
+                performVideoGeneration(outputURL: url)
+            }
+        }
+    }
+    
+    private func performVideoGeneration(outputURL: URL) {
+        errorMessage = nil
+        generatedVideoURL = nil
+        
+        Task {
+            do {
+                let resultURL = try await videoGenerator.generateVideo(
+                    from: screenshots,
+                    settings: videoSettings,
+                    outputURL: outputURL
+                )
+                
+                await MainActor.run {
+                    generatedVideoURL = resultURL
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+    
+    private func formatDuration(_ seconds: Double) -> String {
+        let minutes = Int(seconds) / 60
+        let remainingSeconds = Int(seconds) % 60
+        return String(format: "%d:%02d", minutes, remainingSeconds)
+    }
+    
+    private func formatFileSize(_ bytes: Int64) -> String {
+        let units = ["B", "KB", "MB", "GB"]
+        var size = Double(bytes)
+        var unitIndex = 0
+        
+        while size >= 1024 && unitIndex < units.count - 1 {
+            size /= 1024
+            unitIndex += 1
+        }
+        
+        return String(format: "%.1f %@", size, units[unitIndex])
+    }
+    
+    private func estimateVideoSize() -> Int64 {
+        let duration = Double(screenshots.count) / videoSettings.fps
+        let estimatedSize = Int64(Double(videoSettings.quality.bitRate) * duration / 8)
+        return estimatedSize
     }
 }
 

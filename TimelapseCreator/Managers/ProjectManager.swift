@@ -171,7 +171,7 @@ class ProjectManager: ObservableObject {
 }
 
 // MARK: - Project Model
-struct Project: Identifiable, Equatable {
+struct Project: Identifiable, Equatable, Hashable {
     let id = UUID()
     let name: String
     let url: URL
@@ -179,6 +179,10 @@ struct Project: Identifiable, Equatable {
     
     static func == (lhs: Project, rhs: Project) -> Bool {
         return lhs.id == rhs.id
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
     }
     
     var screenshotCount: Int {
